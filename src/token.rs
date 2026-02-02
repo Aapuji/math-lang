@@ -8,6 +8,7 @@ pub enum TokenKind {
     Float,
 
     Operator, // any operator string
+    Underscore,
 
     // Separators
     LParen, RParen,
@@ -22,6 +23,9 @@ pub enum TokenKind {
     Let, Var, Const, Sym,
     For, While, If, Else, When, Using,
     And, Or, Not, As,
+
+    // Special Keywords
+    SlashIn,
 
     EOF // has length _
 }
@@ -53,9 +57,9 @@ impl Token {
     }
 }
 
-/*
+/* Default Operators
     // 1 Char Operators
-    Plus, Minus, Star, Slash, Caret,
+    Plus, Minus, Star, Slash, Caret, Percent,
     Bar, Amp, Bang, 
     Less, Greater, 
     Equal, Tilde, 
@@ -63,12 +67,19 @@ impl Token {
 
     // 2 Char Operators
     PlusMinus, MinusPlus, DoubleSlash,
-    LessEq, GreaterEq, EqEq, TildeEq,
+    LessEq, GreaterEq, EqEq, BangEq, TildeEq,
     LessColon, GreaterColon, ColonLess,
     PlusEq, MinusEq, StarEq, SlashEq, CaretEq, BarEq, AmpEq,
 
     // 3+ Char Operators
     LessColonLess
-
 */
 
+/* Operator Charset 
+
+! % & * + - * 
+
+
+
+
+*/

@@ -34,9 +34,46 @@ impl<'t> Lexer<'t> {
                     self.lex_string((i, ch), &mut tokens);
                 } else if ch.is_whitespace() {
                     self.next();
+                } else if ch == '(' {
+                    tokens.push(Token::new(
+                        TokenKind::LParen, 
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
+                } else if ch == ')' {
+                    tokens.push(Token::new(
+                        TokenKind::RParen,
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
+                } else if ch == '[' {
+                    tokens.push(Token::new(
+                        TokenKind::LBracket,
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
+                } else if ch == ']' {
+                    tokens.push(Token::new(
+                        TokenKind::RBracket,
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
+                } else if ch == '{' {
+                    tokens.push(Token::new(
+                        TokenKind::LBrace,
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
+                } else if ch == '}' {
+                    tokens.push(Token::new(
+                        TokenKind::RBrace,
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
+                } else if ch == '_' && !matches!(self.text.peek(), Some(&(_, c)) if c.is_ascii_alphabetic() || c == '_') {
+                    tokens.push(Token::new(
+                        TokenKind::Underscore,
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
+                } else if ch.is_ascii_alphabetic() || ch == '_' {
+                    self.lex_ident((i, ch), &mut tokens);
                 }
             } else {
-                tokens.push(Token::eof(0 /* todo!("EOF character index") */, self.source));
+                tokens.push(Token::eof(0 /* todo */, self.source));
                 break 
             }
         }
@@ -87,7 +124,7 @@ impl<'t> Lexer<'t> {
     
     fn lex_string(&mut self, ich: (usize, char), tokens: &mut Vec<Token>) {
         let start = ich.0;
-        let mut end = start + 1;
+        let end: usize;
 
         loop {
             match self.next() {
@@ -97,9 +134,7 @@ impl<'t> Lexer<'t> {
                     break
                 }
 
-                Some((i, ch)) => {
-                    end = i + 1;
-                }
+                Some(_) => {}
 
                 None => {
                     todo!("unterminated string")
@@ -109,6 +144,23 @@ impl<'t> Lexer<'t> {
 
         let span = Span::new(start, end, self.source);
         tokens.push(Token::new(TokenKind::String, span));
+    }
+
+    fn lex_ident(&mut self, ich: (usize, char), tokens: &mut Vec<Token>) {
+        let start = ich.0;
+        let mut end = start + 1;
+
+        loop {
+            match self.next() {
+                Some((i, ch)) if ch.is_ascii_alphanumeric() || ch == '_' => end = i + 1,
+                Some((i, _)) => { end = i; break }
+                None => break
+            }
+        }
+
+        tokens.push(Token::new(
+            TokenKind::Ident, 
+            Span::new(start, end, self.source)));
     }
 
     fn next(&mut self) -> Option<(usize, char)> {

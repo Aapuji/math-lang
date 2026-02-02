@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let lexer = Lexer::new(&content, main_source);
     let tokens = lexer.lex();
 
-    println!("{:?}\n", tokens);
+    println!("{:#?}\n", tokens);
 
     Ok(())
 }
