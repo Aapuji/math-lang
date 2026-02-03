@@ -1,14 +1,17 @@
-use crate::source::{Source, SourceId, Span};
+use crate::source::{SourceId, Span};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     Ident, // follows regex: [a-zA-Z\][a-zA-Z0-9_]*
     String,
     Int,
-    Float,
+    Real,
+    Complex,
+    OperationString, // follows format `[1: OR 2:] <ident|slash-ident>`
+
+    Comment,
 
     Operator, // any operator string
-    Underscore,
 
     // Separators
     LParen, RParen,
@@ -19,15 +22,16 @@ pub enum TokenKind {
     Comma,
     Semicolon,
 
+    At,
+    Underscore,
+
     // Keywords
-    Let, Var, Const, Sym,
+    Let, Var, Const, Sym, Alias, In,
     For, While, If, Else, When, Using,
     And, Or, Not, As,
-
-    // Special Keywords
     SlashIn,
 
-    EOF // has length _
+    EOF // has length 0
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -55,7 +59,17 @@ impl Token {
     pub fn span(&self) -> Span {
         self.span
     }
+
+    pub fn set_kind(&mut self, kind: TokenKind) {
+        self.kind = kind;
+    }
+
+    pub fn set_span_start(&mut self, start: usize) {
+        self.span.set_start(start);
+    }
 }
+
+pub const OPERATOR_CHARSET: &'static str = "=+-*/^%:<>!&|~$?@\\";
 
 /* Default Operators
     // 1 Char Operators
