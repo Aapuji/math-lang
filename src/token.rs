@@ -31,6 +31,8 @@ pub enum TokenKind {
     And, Or, Not, As,
     SlashIn,
 
+    Error,
+    
     EOF // has length 0
 }
 
@@ -69,7 +71,7 @@ impl Token {
     }
 }
 
-pub const OPERATOR_CHARSET: &'static str = "=+-*/^%:<>!&|~$?@\\";
+pub const OPERATOR_CHARSET: &'static str = "=:+-*/^%<>!&|~$?@\\";
 
 /* Default Operators
     // 1 Char Operators

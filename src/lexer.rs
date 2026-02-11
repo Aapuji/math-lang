@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::io;
 use std::iter::Peekable;
 use std::str::CharIndices;
@@ -24,7 +25,7 @@ impl<'t> Lexer<'t> {
     }
 
     /// Consumes lexer to lex the entire source file.
-    pub fn lex(mut self, source_map: &mut SourceMap) -> io::Result<Vec<Token>> {
+    pub fn lex(mut self, source_map: &mut SourceMap) -> Result<Vec<Token>, Box<dyn Error>> {
         let mut tokens: Vec<Token> = vec![];
 
         self.next();
@@ -111,9 +112,29 @@ impl<'t> Lexer<'t> {
                     tokens.push(Token::new(
                         TokenKind::At,
                         Span::new(i, i + 1, self.source)));
-                        self.next();
+                    self.next();
+                } else if ch == '.' && !matches!(self.text.peek(), Some(&(_, c)) if OPERATOR_CHARSET.contains(c)) {
+                    tokens.push(Token::new(
+                        TokenKind::Dot,
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
+                } else if ch == ',' {
+                    tokens.push(Token::new(
+                        TokenKind::Comma,
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
+                } else if ch == ';' {
+                    tokens.push(Token::new(
+                        TokenKind::Semicolon,
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
                 } else if OPERATOR_CHARSET.contains(ch) {
                     self.lex_operator((i, ch), &mut tokens);
+                } else {
+                    tokens.push(Token::new(
+                        TokenKind::Error,
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
                 }
             } else {
                 tokens.push(Token::eof(0 /* todo */, self.source));
@@ -266,4 +287,9 @@ impl<'t> Lexer<'t> {
         self.ich = self.text.next();
         self.ich
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum LexerError {
+    UnknownCharacter
 }
