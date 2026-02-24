@@ -6,19 +6,21 @@ use std::str::CharIndices;
 use unicode_ident::{is_xid_start, is_xid_continue};
 
 use crate::source::{SourceId, SourceMap, Span};
-use crate::token::{OPERATOR_CHARSET, Token, TokenKind};
+use crate::token::{LexerErrorKind, OPERATOR_CHARSET, Token, TokenKind};
 
 #[derive(Debug)]
 pub struct Lexer<'t> {
     text: Peekable<CharIndices<'t>>,
+    len: usize,
     source: SourceId,
     ich: Option<(usize, char)>,
 }
 
 impl<'t> Lexer<'t> {
-    pub fn new(content: &'t str, source: SourceId) -> Self {
+    pub fn new(content: &'t str, source: SourceId) -> Self {                
         Self {
             text: content.char_indices().peekable(),
+            len: content.len(),
             source,
             ich: None,
         }
@@ -38,6 +40,8 @@ impl<'t> Lexer<'t> {
                     self.lex_string((i, ch), &mut tokens);
                 } else if ch.is_whitespace() {
                     self.next();
+                } else if ch == '#' {
+                    self.lex_comment((i, ch), &mut tokens);
                 } else if ch == '(' {
                     tokens.push(Token::new(
                         TokenKind::LParen, 
@@ -130,14 +134,19 @@ impl<'t> Lexer<'t> {
                     self.next();
                 } else if OPERATOR_CHARSET.contains(ch) {
                     self.lex_operator((i, ch), &mut tokens);
+                } else if ch == '`' {
+                    tokens.push(Token::new(
+                        TokenKind::Backtick,
+                        Span::new(i, i + 1, self.source)));
+                    self.next();
                 } else {
                     tokens.push(Token::new(
-                        TokenKind::Error,
+                        TokenKind::Error(LexerErrorKind::UnknownCharacter),
                         Span::new(i, i + 1, self.source)));
                     self.next();
                 }
             } else {
-                tokens.push(Token::eof(0 /* todo */, self.source));
+                tokens.push(Token::eof(self.len, self.source));
                 break 
             }
         }
@@ -208,7 +217,9 @@ impl<'t> Lexer<'t> {
                 Some(_) => {}
 
                 None => {
-                    todo!("unterminated string")
+                    tokens.push(Token::new(
+                        TokenKind::Error(LexerErrorKind::UnterminatedString),
+                        Span::new(start, self.len, self.source)));
                 }
             }
         }
@@ -283,13 +294,129 @@ impl<'t> Lexer<'t> {
             Span::new(start, end, self.source)));
     }
 
+    /// Skips regular comments (line: #, block: #= =#) but lexes doc comments (line: ##, block: ##= =#).
+    fn lex_comment(&mut self, ich: (usize, char), tokens: &mut Vec<Token>) {
+        let start = ich.0;
+
+        match self.next() {
+            // Block Comment
+            Some((_, '=')) => {
+                let mut comment_depth = 1;
+
+                loop {
+                    match self.next() {
+                        Some((_, '=')) => if let Some(&(_, '#')) = self.text.peek() {
+                            comment_depth -= 1;
+                            self.next();
+                            self.next();
+
+                            if comment_depth == 0 {
+                                break
+                            }
+                        }
+
+                        Some((_, '#')) => if let Some(&(_, '=')) = self.text.peek() {
+                            comment_depth += 1;
+                            self.next();
+                        } else if let Some((_, '#')) = self.next() {                            
+                            if let Some((_, '=')) = self.text.peek() {
+                                comment_depth += 1;
+                                self.next();
+                            }
+                        }
+
+                        Some(_) => (),
+
+                        None => {
+                            tokens.push(Token::new(
+                            TokenKind::Error(LexerErrorKind::UnterminatedBlockComment),
+                            Span::new(start, self.len, self.source)));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Doc Comments
+            Some((_, '#')) => if let Some(&(_, '=')) = self.text.peek() {
+                let mut comment_depth = 1;
+
+                loop {
+                    match self.next() {
+                        Some((_, '=')) => if let Some(&(i, '#')) = self.text.peek() {
+                            comment_depth -= 1;
+                            self.next();
+                            self.next();
+
+                            if comment_depth == 0 {
+                                tokens.push(Token::new(
+                                    TokenKind::DocComment,
+                                    Span::new(start, i + 1, self.source)));
+                                break
+                            }
+                        }
+
+                        Some((_, '#')) => if let Some(&(_, '=')) = self.text.peek() {
+                            comment_depth += 1;
+                            self.next();
+                        } else if let Some((_, '#')) = self.next() {                            
+                            if let Some((_, '=')) = self.text.peek() {
+                                comment_depth += 1;
+                                self.next();
+                            }
+                        }
+
+                        Some(_) => (),
+
+                        None => {
+                            tokens.push(Token::new(
+                            TokenKind::Error(LexerErrorKind::UnterminatedBlockComment),
+                            Span::new(start, self.len, self.source)));
+                            break;
+                        }
+                    }
+                }
+            } else {
+                loop {
+                    match self.next() {
+                        Some((i, '\n')) => {
+                            tokens.push(Token::new(
+                                TokenKind::DocComment,
+                                Span::new(start, i + 1, self.source)));
+                            self.next();
+                            break
+                        }
+
+                        Some(_) => (),
+
+                        None => {
+                            tokens.push(Token::new(
+                                TokenKind::DocComment,
+                                Span::new(start, self.len, self.source)));
+                            break
+                        }
+                    }
+                }
+            }
+
+            // Line Comment
+            _ => loop {
+                match self.next() {
+                    Some((_, '\n')) => {
+                        self.next();
+                        break
+                    }
+
+                    Some(_) => (),
+
+                    None => break
+                }
+            }
+        }
+    }
+
     fn next(&mut self) -> Option<(usize, char)> {
         self.ich = self.text.next();
         self.ich
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum LexerError {
-    UnknownCharacter
 }

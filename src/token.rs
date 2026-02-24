@@ -7,9 +7,8 @@ pub enum TokenKind {
     Int,
     Real,
     Complex,
-    OperationString, // follows format `[1: OR 2:] <ident|slash-ident>`
 
-    Comment,
+    DocComment,
 
     Operator, // any operator string
 
@@ -22,6 +21,8 @@ pub enum TokenKind {
     Comma,
     Semicolon,
 
+    Backtick,
+
     At,
     Underscore,
 
@@ -31,9 +32,16 @@ pub enum TokenKind {
     And, Or, Not, As,
     SlashIn,
 
-    Error,
+    Error(LexerErrorKind),
     
     EOF // has length 0
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LexerErrorKind {
+    UnknownCharacter,
+    UnterminatedString,
+    UnterminatedBlockComment
 }
 
 #[derive(Debug, Clone, Copy)]
