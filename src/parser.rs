@@ -1,7 +1,8 @@
 use std::iter::{Chain, Peekable, Repeat, repeat};
+use std::thread::current;
 use std::vec::IntoIter;
 
-use crate::ast::{Expr, Stmt};
+use crate::ast::{Expr, Stmt, Type};
 use crate::source::SourceMap;
 use crate::token::{Token, TokenKind};
 
@@ -11,22 +12,6 @@ type TokenStream = Peekable<Chain<IntoIter<Token>, Repeat<Token>>>;
 pub struct Parser {
     tokens: TokenStream,
     current_token: Token
-}
-
-macro_rules! accept_match {
-    ($self:expr, $value:expr,
-        $( $pat:pat $(if $guard:expr)? => $body:expr ),+ $(,)?
-    ) => {
-        match $value {
-            $(
-                $pat $(if $guard)? => {
-                    let body = $body;
-                    $self.accept($value);
-                    body
-                }
-            ),+
-        }
-    };
 }
 
 impl Parser {
@@ -48,29 +33,103 @@ impl Parser {
         let mut stmts = vec![];
 
         while !self.at_end() {            
-            stmts.push(self.parse_stmt());
+            stmts.push(self.parse_stmt(source_map));
             self.advance();
         }
 
         stmts
     }
 
-    fn parse_stmt(&mut self) -> Stmt {
+    fn parse_stmt(&mut self, source_map: &SourceMap) -> Stmt {
         if self.starts_non_expr_stmt() {
-            self.parse_non_expr_stmt()
+            self.parse_non_expr_stmt(source_map)
         } else {
-            self.parse_expr_stmt()
+            self.parse_expr_stmt(source_map)
         }
     }
 
-    fn parse_non_expr_stmt(&mut self) -> Stmt {
+    fn parse_non_expr_stmt(&mut self, source_map: &SourceMap) -> Stmt {
         match self.current_kind() {
-            _ => todo!(),
+            TokenKind::Var => self.parse_var(source_map),
+            TokenKind::Const => self.parse_const(source_map),
+            _ => todo!()
         }
     }
 
-    fn parse_expr_stmt(&mut self) -> Stmt {
-        let expr = self.parse_expr();
+    fn parse_var(&mut self, source_map: &SourceMap) -> Stmt {        
+        self.accept(TokenKind::Var);
+        
+        if let TokenKind::Ident = self.current_kind() {
+            let name = self.current().clone();
+            self.advance();
+
+            let ty = if self.accept_op(source_map, ":") {
+                Some(self.parse_type())
+            } else { None };
+
+            let def = if self.accept_op(source_map, "=") {
+                Some(self.parse_expr(source_map))
+            } else { None };
+
+            if self.accept(TokenKind::In) {
+                let expr = self.parse_expr(source_map);
+                self.expect(TokenKind::Semicolon);
+
+                Stmt::Expr(Expr::VarIn(name, ty, def.map(Box::new), Box::new(expr)))
+            } else {
+                Stmt::Var(name, ty, def)
+            }
+        } else {
+            todo!()
+        }
+    }
+
+    fn parse_const(&mut self, source_map: &SourceMap) -> Stmt {        
+        self.accept(TokenKind::Const);
+        
+        if let TokenKind::Ident = self.current_kind() {
+            let name = self.current().clone();
+            self.advance();
+
+            let ty = if self.accept_op(source_map, ":") {
+                Some(self.parse_type())
+            } else { None };
+
+            let def = if self.accept_op(source_map, "=") {
+                Some(self.parse_expr(source_map))
+            } else { None };
+
+            if self.accept(TokenKind::In) {
+                let expr = self.parse_expr(source_map);
+                self.expect(TokenKind::Semicolon);
+
+                Stmt::Expr(Expr::ConstIn(name, ty, def.map(Box::new), Box::new(expr)))
+            } else {
+                Stmt::Const(name, ty, def)
+            }
+        } else {
+            todo!()
+        }
+    }
+
+    fn parse_type(&mut self) -> Type {
+        self.parse_primary_type()
+    }
+
+    fn parse_primary_type(&mut self) -> Type {
+        match self.current_kind() {
+            TokenKind::Ident => {
+                let ty = Type::Named(*self.current());
+                self.accept(TokenKind::Ident);
+                ty
+            }
+
+            _ => todo!()
+        }
+    }
+
+    fn parse_expr_stmt(&mut self, source_map: &SourceMap) -> Stmt {
+        let expr = self.parse_expr(source_map);
 
         if self.accept(TokenKind::Semicolon) || self.accept(TokenKind::EOF) {
             Stmt::Expr(expr)
@@ -79,9 +138,9 @@ impl Parser {
         }
     }
 
-    fn parse_expr(&mut self) -> Expr {
+    fn parse_expr(&mut self, source_map: &SourceMap) -> Expr {
         if self.accept(TokenKind::LBrace) {
-            self.parse_block()
+            self.parse_block(source_map)
         } else {
             self.parse_primary()
         }
@@ -99,17 +158,17 @@ impl Parser {
         )
     }
 
-    fn parse_block(&mut self) -> Expr {
+    fn parse_block(&mut self, source_map: &SourceMap) -> Expr {
         let mut stmts = vec![];
         let mut tail = None;
 
         while self.current_kind() != TokenKind::RBrace {
             if self.starts_non_expr_stmt() {
-                let stmt = self.parse_non_expr_stmt();
+                let stmt = self.parse_non_expr_stmt(source_map);
                 self.expect(TokenKind::Semicolon);
                 stmts.push(stmt);
             } else {
-                let expr = self.parse_expr();
+                let expr = self.parse_expr(source_map);
 
                 if self.accept(TokenKind::Semicolon) {
                     stmts.push(Stmt::Expr(expr));
@@ -125,11 +184,43 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Expr {
-        accept_match! { self, self.current_kind(),
-            TokenKind::Int => Expr::Int(*self.current()),
-            TokenKind::Real => Expr::Real(*self.current()),
-            TokenKind::Complex => Expr::Complex(*self.current()),
-            _ => todo!()
+        match self.current_kind() {
+            TokenKind::Int => {
+                let expr = Expr::Int(*self.current());
+                self.advance();
+
+                expr
+            }
+
+            TokenKind::Real => {
+                let expr = Expr::Int(*self.current());
+                self.advance();
+
+                expr
+            }
+
+            TokenKind::Complex => {
+                let expr = Expr::Int(*self.current());
+                self.advance();
+
+                expr
+            }
+
+            TokenKind::Ident => {
+                let ident = Expr::Ident(*self.current());
+                self.advance();
+
+                ident
+            }
+
+            TokenKind::String => {
+                let string = Expr::String(*self.current());
+                self.advance();
+
+                string
+            }
+
+            _ => todo!("{:?}", self.current_kind())
         }
     }
 
@@ -177,11 +268,11 @@ impl Parser {
         }
     }
 
-    fn error(&mut self, kind: TokenKind) {
+    fn error(&self, kind: TokenKind) {
         todo!("@ {:?}", kind)
     }
 
-    fn error_at(&mut self, token: &Token) {
+    fn error_at(&self, token: &Token) {
         todo!("@ {:#?}", token)
     }
 
@@ -200,11 +291,6 @@ impl Parser {
 
     fn peek_kind(&mut self) -> TokenKind {
         self.peek().kind()
-    }
-
-    /// Checks if peeked token matches the given `TokenKind`.
-    fn check(&mut self, kind: TokenKind) -> bool {
-        self.peek_kind() == kind
     }
 
     fn current(&self) -> &Token {
