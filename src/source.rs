@@ -1,8 +1,4 @@
-use std::fs;
-use std::fs::read_to_string;
-use std::io;
 use std::ops::Range;
-use std::path::Path;
 use std::path::PathBuf;
 
 /// Represents a span of content in some source
@@ -61,12 +57,12 @@ pub enum SourceKind {
 pub struct Source {
     path: PathBuf,
     kind: SourceKind,
-    data: Option<String>
+    data: String
     // line_offsets: Vec<usize>
 }
 
 impl Source {
-    pub fn new(path: PathBuf, kind: SourceKind, data: Option<String>) -> Self {
+    pub fn new(path: PathBuf, kind: SourceKind, data: String) -> Self {
         Self { path, kind, data }
     }
 
@@ -74,20 +70,8 @@ impl Source {
         self.kind
     }
 
-    pub fn data(&self) -> Option<&str> {
-        self.data
-            .as_ref()
-            .map(|s| s.as_str())
-    }
-
-    pub fn get_data(&mut self) -> io::Result<&str> {
-        match self.data {
-            Some(ref text) => Ok(text),
-            None => {
-                self.data = Some(read_to_string(self.path.as_path())?);
-                Ok(self.get_data().unwrap())
-            }
-        }
+    pub fn data(&self) -> &str {
+        &self.data
     }
 }
 

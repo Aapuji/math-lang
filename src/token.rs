@@ -10,7 +10,11 @@ pub enum TokenKind {
 
     DocComment,
 
-    Operator, // any operator string
+    Operator, // any operator
+
+    At,
+    Backtick,
+    Underscore,
 
     // Separators
     LParen, RParen,
@@ -21,13 +25,8 @@ pub enum TokenKind {
     Comma,
     Semicolon,
 
-    Backtick,
-
-    At,
-    Underscore,
-
     // Keywords
-    Let, Var, Const, Sym, Alias, In,
+    Let, Var, Const, Fn, Sym, Alias, In,
     For, While, If, Else, When, Using,
     And, Or, Not, As,
     SlashIn,
@@ -44,7 +43,7 @@ pub enum LexerErrorKind {
     UnterminatedBlockComment
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token {
     kind: TokenKind,
     span: Span
@@ -97,13 +96,4 @@ pub const OPERATOR_CHARSET: &'static str = "=:+-*/^%<>!&|~$?@\\";
 
     // 3+ Char Operators
     LessColonLess
-*/
-
-/* Operator Charset 
-
-! % & * + - * 
-
-
-
-
 */

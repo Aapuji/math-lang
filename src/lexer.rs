@@ -1,5 +1,3 @@
-use std::error::Error;
-use std::io;
 use std::iter::Peekable;
 use std::str::CharIndices;
 
@@ -27,7 +25,7 @@ impl<'t> Lexer<'t> {
     }
 
     /// Consumes lexer to lex the entire source file.
-    pub fn lex(mut self, source_map: &mut SourceMap) -> Result<Vec<Token>, Box<dyn Error>> {
+    pub fn lex(mut self, source_map: &mut SourceMap) -> Vec<Token> {
         let mut tokens: Vec<Token> = vec![];
 
         self.next();
@@ -83,7 +81,7 @@ impl<'t> Lexer<'t> {
                         Span::new(i, i + 1, self.source)));
                     self.next();
                 } else if is_xid_start(ch) || ch == '_' {
-                    self.lex_ident(false, (i, ch), &mut tokens, source_map)?;
+                    self.lex_ident(false, (i, ch), &mut tokens, source_map);
                 } else if ch == '\\' {
                     match self.text.peek() {
                         Some(&(new_i, ch)) if OPERATOR_CHARSET.contains(ch) => {
@@ -99,7 +97,7 @@ impl<'t> Lexer<'t> {
                         Some(&(new_i, ch)) if ch.is_ascii_alphanumeric() || ch == '_' => {
                             let start = i;
                             self.next();
-                            self.lex_ident(true, (new_i, ch), &mut tokens, source_map)?;
+                            self.lex_ident(true, (new_i, ch), &mut tokens, source_map);
 
                             let token = tokens.last_mut().unwrap();
                             token.set_span_start(start);
@@ -151,7 +149,7 @@ impl<'t> Lexer<'t> {
             }
         }
         
-        return Ok(tokens);
+        return tokens;
     }
 
     fn lex_number(&mut self, ich: (usize, char), tokens: &mut Vec<Token>) {
@@ -229,7 +227,7 @@ impl<'t> Lexer<'t> {
     }
 
     // Note: Does not perform any normalization. But, that still must be done to make sure all identifiers are normalized accoridng to NFC (use unicode-normalization crate). Eg. e and aigu-mark should be normalized to e-aigu.
-    fn lex_ident(&mut self, after_slash: bool, ich: (usize, char), tokens: &mut Vec<Token>, source_map: &mut SourceMap) -> io::Result<()> {
+    fn lex_ident(&mut self, after_slash: bool, ich: (usize, char), tokens: &mut Vec<Token>, source_map: &mut SourceMap) {
         let start = ich.0;
         let mut end = start + 1;
 
@@ -244,13 +242,14 @@ impl<'t> Lexer<'t> {
         let span = Span::new(start, end, self.source);
         let text = source_map
             .get_source_mut(self.source)
-            .get_data()?;
+            .data();
 
         if !after_slash {
             match &text[start..end] {
                 "let" => tokens.push(Token::new(TokenKind::Let, span)),
                 "var" => tokens.push(Token::new(TokenKind::Var, span)),
                 "const" => tokens.push(Token::new(TokenKind::Const, span)),
+                "fn" => tokens.push(Token::new(TokenKind::Fn, span)),
                 "sym" => tokens.push(Token::new(TokenKind::Sym, span)),
                 "alias" => tokens.push(Token::new(TokenKind::Alias, span)),
                 "in" => tokens.push(Token::new(TokenKind::In, span)),
@@ -273,8 +272,6 @@ impl<'t> Lexer<'t> {
                 _ => tokens.push(Token::new(TokenKind::Ident, span)),
             }
         }
-        
-        Ok(())
     }
 
     fn lex_operator(&mut self, ich: (usize, char), tokens: &mut Vec<Token>) {
