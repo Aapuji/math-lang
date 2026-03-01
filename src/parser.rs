@@ -1,5 +1,4 @@
 use std::iter::{Chain, Peekable, Repeat, repeat};
-use std::thread::current;
 use std::vec::IntoIter;
 
 use crate::ast::{Expr, Stmt, Type};
@@ -16,10 +15,10 @@ pub struct Parser {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        let last = tokens.last().cloned();
+        let last = *tokens.last().unwrap();
         let mut t = tokens
             .into_iter()
-            .chain(repeat(last.unwrap()))
+            .chain(repeat(last))
             .peekable();
         let current = t.next().unwrap();
 
@@ -50,9 +49,103 @@ impl Parser {
 
     fn parse_non_expr_stmt(&mut self, source_map: &SourceMap) -> Stmt {
         match self.current_kind() {
+            TokenKind::Let => self.parse_let(source_map),
             TokenKind::Var => self.parse_var(source_map),
             TokenKind::Const => self.parse_const(source_map),
             _ => todo!()
+        }
+    }
+
+    fn parse_let(&mut self, source_map: &SourceMap) -> Stmt {
+        self.accept(TokenKind::Let);
+
+        if let TokenKind::Ident = self.current_kind() {
+            let mut names = vec![*self.current()];
+            self.advance();
+
+            let args = if self.accept(TokenKind::LParen) {
+                let mut args = vec![];
+                
+                loop {
+                    if let TokenKind::Ident = self.current_kind() {
+                        let arg = *self.current();
+                        self.advance();
+
+                        let ty = if self.accept_op(source_map, ":") {
+                            Some(self.parse_type())
+                        } else { None };
+
+                        args.push((arg, ty));
+
+                        if self.accept(TokenKind::Comma) && self.accept(TokenKind::RParen) 
+                            || self.accept(TokenKind::RParen) {
+                            break
+                        }
+                    } else if self.accept(TokenKind::RParen) {
+                        break
+                    } else {
+                        todo!()
+                    }
+                }
+
+                Some(args)
+            } else {
+                while self.accept(TokenKind::Comma) {
+                    names.push(*self.current());
+                    self.advance();
+                }
+
+                None
+            };
+
+            let ty = if self.accept_op(source_map, ":") {
+                Some(self.parse_type())
+            } else { None };
+
+            let mut is_def = false;
+            let def = if self.accept_op(source_map, "=") {
+                Some(self.parse_expr(source_map))
+            } else if self.accept_op(source_map, ":=") {
+                is_def = true;
+                Some(self.parse_expr(source_map))
+            } else { None };
+
+            if self.accept(TokenKind::In) {
+                let expr = self.parse_expr(source_map);
+                self.expect(TokenKind::Semicolon);
+
+                if names.len() == 1 {
+                    Stmt::Expr(if is_def {
+                        Expr::DefIn(names[0], args, ty, Box::new(def.unwrap()), Box::new(expr))
+                    } else {
+                        Expr::LetIn(names[0], args, ty, def.map(Box::new), Box::new(expr))
+                    })
+                } else {
+                    Stmt::Expr(if is_def {
+                        Expr::DefManyIn(names, ty, Box::new(def.unwrap()), Box::new(expr))
+                    } else {
+                        Expr::LetManyIn(names, ty, def.map(Box::new), Box::new(expr))
+                    })
+                }
+            } else {
+                self.expect(TokenKind::Semicolon);
+
+                if names.len() == 1 {
+                    if is_def {
+                        Stmt::Def(names[0], args, ty, def.unwrap())
+                    } else {
+                        Stmt::Let(names[0], args, ty, def)
+                    }
+                } else {
+                    if is_def {
+                        Stmt::DefMany(names, ty, def.unwrap())
+                    } else {
+                        Stmt::LetMany(names, ty, def)
+                    }
+                }
+            }
+        } else {
+            todo!()
         }
     }
 
@@ -60,7 +153,7 @@ impl Parser {
         self.accept(TokenKind::Var);
         
         if let TokenKind::Ident = self.current_kind() {
-            let name = self.current().clone();
+            let name = *self.current();
             self.advance();
 
             let ty = if self.accept_op(source_map, ":") {
@@ -77,6 +170,7 @@ impl Parser {
 
                 Stmt::Expr(Expr::VarIn(name, ty, def.map(Box::new), Box::new(expr)))
             } else {
+                self.expect(TokenKind::Semicolon);
                 Stmt::Var(name, ty, def)
             }
         } else {
@@ -88,7 +182,7 @@ impl Parser {
         self.accept(TokenKind::Const);
         
         if let TokenKind::Ident = self.current_kind() {
-            let name = self.current().clone();
+            let name = *self.current();
             self.advance();
 
             let ty = if self.accept_op(source_map, ":") {
@@ -105,6 +199,7 @@ impl Parser {
 
                 Stmt::Expr(Expr::ConstIn(name, ty, def.map(Box::new), Box::new(expr)))
             } else {
+                self.expect(TokenKind::Semicolon);
                 Stmt::Const(name, ty, def)
             }
         } else {
@@ -120,7 +215,8 @@ impl Parser {
         match self.current_kind() {
             TokenKind::Ident => {
                 let ty = Type::Named(*self.current());
-                self.accept(TokenKind::Ident);
+                self.advance();
+                
                 ty
             }
 
@@ -193,14 +289,14 @@ impl Parser {
             }
 
             TokenKind::Real => {
-                let expr = Expr::Int(*self.current());
+                let expr = Expr::Real(*self.current());
                 self.advance();
 
                 expr
             }
 
             TokenKind::Complex => {
-                let expr = Expr::Int(*self.current());
+                let expr = Expr::Complex(*self.current());
                 self.advance();
 
                 expr
@@ -259,7 +355,7 @@ impl Parser {
     }
 
     /// Expects that the current token is an operator and that it matches the given operator lexeme. If so, it advances and outputs true. Otherwise is reports an error and outputs `false`.
-    fn expect_op(&mut self, source_map: &mut SourceMap, op: &str) -> bool {
+    fn expect_op(&mut self, source_map: &SourceMap, op: &str) -> bool {
         if self.accept_op(source_map, op) {
             true
         } else {
