@@ -14,6 +14,8 @@ pub struct Parser {
 }
 
 impl Parser {
+    pub const MAX_ARGS: usize = 255;
+
     pub fn new(tokens: Vec<Token>) -> Self {
         let last = *tokens.last().unwrap();
         let mut t = tokens
@@ -223,6 +225,18 @@ impl Parser {
             _ => todo!()
         }
     }
+    
+    fn starts_non_expr_stmt(&self) -> bool {
+        matches!(self.current_kind(), 
+              TokenKind::Let
+            | TokenKind::Var
+            | TokenKind::Const
+            | TokenKind::Fn
+            | TokenKind::Sym
+            | TokenKind::Alias
+            | TokenKind::Using
+        )
+    }
 
     fn parse_expr_stmt(&mut self, source_map: &SourceMap) -> Stmt {
         let expr = self.parse_expr(source_map);
@@ -238,20 +252,8 @@ impl Parser {
         if self.accept(TokenKind::LBrace) {
             self.parse_block(source_map)
         } else {
-            self.parse_primary()
+            self.parse_call(source_map)
         }
-    }
-
-    fn starts_non_expr_stmt(&self) -> bool {
-        matches!(self.current_kind(), 
-              TokenKind::Let
-            | TokenKind::Var
-            | TokenKind::Const
-            | TokenKind::Fn
-            | TokenKind::Sym
-            | TokenKind::Alias
-            | TokenKind::Using
-        )
     }
 
     fn parse_block(&mut self, source_map: &SourceMap) -> Expr {
@@ -277,6 +279,36 @@ impl Parser {
 
         self.expect(TokenKind::RBrace);
         Expr::Block(stmts, tail)
+    }
+
+    fn parse_call(&mut self, source_map: &SourceMap) -> Expr {
+        let expr = self.parse_primary();
+
+        if self.accept(TokenKind::LParen) {
+            self.finish_call(source_map, expr)
+        } else { // TODO: ident . smth
+            expr
+        }
+    }
+
+    fn finish_call(&mut self, source_map: &SourceMap, callee: Expr) -> Expr {
+        let mut args = vec![];
+
+        while !self.accept(TokenKind::RParen) {
+            if args.len() >= Self::MAX_ARGS {
+                todo!("too many arguments")
+            }
+
+            args.push(self.parse_expr(source_map));
+
+            if self.accept(TokenKind::RParen) {
+                break
+            } else if !self.expect(TokenKind::Comma) {
+                self.error(self.current_kind());
+            }
+        }
+
+        Expr::Call(Box::new(callee), args)
     }
 
     fn parse_primary(&mut self) -> Expr {

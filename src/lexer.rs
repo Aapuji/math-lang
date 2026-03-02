@@ -257,6 +257,7 @@ impl<'t> Lexer<'t> {
                 "while" => tokens.push(Token::new(TokenKind::While, span)),
                 "if" => tokens.push(Token::new(TokenKind::If, span)),
                 "else" => tokens.push(Token::new(TokenKind::Else, span)),
+                "match" => tokens.push(Token::new(TokenKind::Match, span)),
                 "when" => tokens.push(Token::new(TokenKind::When, span)),
                 "using" => tokens.push(Token::new(TokenKind::Using, span)),
                 "and" => tokens.push(Token::new(TokenKind::And, span)),

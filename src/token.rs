@@ -27,7 +27,7 @@ pub enum TokenKind {
 
     // Keywords
     Let, Var, Const, Fn, Sym, Alias, In,
-    For, While, If, Else, When, Using,
+    For, While, If, Else, Match, When, Using,
     And, Or, Not, As,
     SlashIn,
 

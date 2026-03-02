@@ -19,6 +19,7 @@ pub enum Expr {
     Real(Token),
     Complex(Token),
     Block(Vec<Stmt>, Option<Box<Expr>>),
+    Call(Box<Expr>, Vec<Expr>),
     LetIn(Token, Option<Vec<(Token, Option<Type>)>>, Option<Type>, Option<Box<Expr>>, Box<Expr>),
     LetManyIn(Vec<Token>, Option<Type>, Option<Box<Expr>>, Box<Expr>),
     DefIn(Token, Option<Vec<(Token, Option<Type>)>>, Option<Type>, Box<Expr>, Box<Expr>),
