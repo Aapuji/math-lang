@@ -1,6 +1,5 @@
 use std::iter::Peekable;
 use std::str::CharIndices;
-use std::sync::BarrierWaitResult;
 
 use unicode_ident::{is_xid_start, is_xid_continue};
 
@@ -13,6 +12,7 @@ pub struct Lexer<'t> {
     len: usize,
     source: SourceId,
     ich: Option<(usize, char)>,
+    mode_stack: Vec<LexerMode>          // empty means Normal mode  
 }
 
 impl<'t> Lexer<'t> {
@@ -22,6 +22,7 @@ impl<'t> Lexer<'t> {
             len: content.len(),
             source,
             ich: None,
+            mode_stack: vec![]
         }
     }
 
@@ -32,7 +33,9 @@ impl<'t> Lexer<'t> {
         self.next();
 
         loop {
-            if let Some((i, ch)) = self.ich {
+            if let Some(&LexerMode::String(str_start, prefix)) = self.mode_stack.last() {
+                self.continue_string(str_start, &mut tokens, prefix);
+            } else if let Some((i, ch)) = self.ich {
                 if ch.is_ascii_digit() {
                     self.lex_number((i, ch), &mut tokens);
                 } else if ch == '"' {
@@ -66,14 +69,37 @@ impl<'t> Lexer<'t> {
                         Span::new(i, i + 1, self.source)));
                     self.next();
                 } else if ch == '{' {
+                    if let Some(LexerMode::Interpolate(_, n, _)) = self.mode_stack.last_mut() {
+                        *n += 1;
+                    }
+
                     tokens.push(Token::new(
                         TokenKind::LBrace,
                         Span::new(i, i + 1, self.source)));
                     self.next();
                 } else if ch == '}' {
-                    tokens.push(Token::new(
-                        TokenKind::RBrace,
-                        Span::new(i, i + 1, self.source)));
+                    match self.mode_stack.last_mut() {
+                        Some(LexerMode::Interpolate(_, 0, _)) => {
+                            self.mode_stack.pop();
+
+                            tokens.push(Token::new(
+                                TokenKind::InterpolateEnd,
+                                Span::new(i, i + 1, self.source)));
+                        }
+
+                        Some(LexerMode::Interpolate(_, n, _)) => {
+                            *n -= 1;
+
+                            tokens.push(Token::new(
+                                TokenKind::RBrace,
+                                Span::new(i, i + 1, self.source)));
+                        }
+
+                        _ => tokens.push(Token::new(
+                            TokenKind::RBrace,
+                            Span::new(i, i + 1, self.source)))
+                    }
+
                     self.next();
                 } else if ch == '_' && !matches!(self.text.peek(), Some(&(_, c)) if is_xid_start(c) || c == '_') {
                     tokens.push(Token::new(
@@ -149,6 +175,20 @@ impl<'t> Lexer<'t> {
                     self.next();
                 }
             } else {
+                while !self.mode_stack.is_empty() {
+                    match self.mode_stack.last() {
+                        Some(LexerMode::Interpolate(int_start, _, _)) => tokens.push(Token::new(
+                            TokenKind::Error(LexerErrorKind::UnterminatedInterpolation),
+                            Span::new(*int_start, self.len, self.source))),
+
+                        Some(LexerMode::String(str_start, _)) => tokens.push(Token::new(
+                            TokenKind::Error(LexerErrorKind::UnterminatedString),
+                            Span::new(*str_start, self.len, self.source))),
+                        
+                        None => ()
+                    }
+                }
+
                 tokens.push(Token::eof(self.len, self.source));
                 break 
             }
@@ -205,68 +245,119 @@ impl<'t> Lexer<'t> {
     }
 
     fn lex_string(&mut self, ich: (usize, char), tokens: &mut Vec<Token>, prefix: StringPrefix) {
-        use StringPrefix::{None as N, F, R};
+        let start = ich.0;
+        let end = ich.0 + if let StringPrefix::None = prefix { 1 } else { self.next(); 2 };
         
-        let mut toks = vec![];
-        let mut errs = vec![];
+        tokens.push(Token::new(
+            TokenKind::StringStart,
+            Span::new(start, end, self.source)));
+        
+        self.mode_stack.push(LexerMode::String(ich.0, prefix));
+        self.next();
+        self.continue_string(ich.0, tokens, prefix);
+    }
 
-        let mut tok_kind = Some(TokenKind::StringStart);
-        let mut tok_start = ich.0;
-        let mut tok_end = ich.0 + if let N = prefix { 1 } else { self.next(); 2 };
+    fn continue_string(&mut self, str_start: usize, tokens: &mut Vec<Token>, prefix: StringPrefix) {
+        use StringPrefix::{None as N, F};
+        
+        let mut kind = None;
+        let mut start = str_start;
+        let mut end = str_start + 1; // these will be reinitialized
 
         macro_rules! push_prev_tok {
             ( ) => {
-                if let Some(kind) = tok_kind {
-                    toks.push(Token::new(
-                        kind, 
-                        Span::new(tok_start, tok_end, self.source)));
+                if let Some(k) = kind {
+                    tokens.push(Token::new(k, Span::new(start, end, self.source)));
                     
-                    tok_kind = None;
-                    tok_start = tok_end;
+                    kind = None;
+                    start = end;
                 }
             }
-        };
+        }
 
         macro_rules! push_unterminated_str {
-            ( $start:expr ) => {
+            ( ) => {
                 {
-                    tokens.append(&mut errs);
                     tokens.push(Token::new(
                         TokenKind::Error(LexerErrorKind::UnterminatedString),
-                        Span::new($start, self.len, self.source)));
+                        Span::new(str_start, self.len, self.source)));
+                    
+                    while !self.mode_stack.is_empty() {
+                        match self.mode_stack.last() {
+                            Some(LexerMode::String(str_start, _)) => {
+                                tokens.push(Token::new(
+                                    TokenKind::Error(LexerErrorKind::UnterminatedString),
+                                    Span::new(*str_start, self.len, self.source)
+                                ));
+                                self.mode_stack.pop();
+                            } 
+
+                            Some(LexerMode::Interpolate(int_start, _, _)) => {
+                                tokens.push(Token::new(
+
+                                    TokenKind::Error(LexerErrorKind::UnterminatedInterpolation),
+                                    Span::new(*int_start, self.len, self.source)
+                                ));
+                            }
+
+                            None => ()
+                        }
+                    }
                 }
             };
         }
 
         loop {
-            match (self.next(), prefix) {
+            match (self.ich, prefix) {
                 // end of string
                 (Some((i, '"')), _) => {
                     push_prev_tok!();
 
-                    tok_start = i;
-                    tok_end = i + 1;
+                    start = i;
+                    end = i + 1;
 
                     self.next();
 
-                    if errs.is_empty() {
-                        tokens.append(&mut toks);
-                    } else {
-                        return tokens.append(&mut errs);
-                    }
-
+                    self.mode_stack.pop();
                     return tokens.push(Token::new(
                         TokenKind::StringEnd,
-                        Span::new(tok_start, tok_end, self.source)));
+                        Span::new(start, end, self.source)));
+                }
+
+                // fstring interpolation
+                (Some((i, '{')), F) => {
+                    if let Some(&(i, '{')) = self.text.peek() {
+                        if let Some(TokenKind::StringSegment) = kind {
+                            end = i + 1;
+                        } else {
+                            push_prev_tok!();
+
+                            kind = Some(TokenKind::StringStart);
+                            start = i - 1;
+                            end = i + 1;
+                        }
+                    } else { // todo: format specifiers (width, etc.)?
+                        push_prev_tok!();
+
+                        kind = Some(TokenKind::InterpolateStart);
+                        start = i;
+                        end = i + 1;
+
+                        push_prev_tok!();
+
+                        self.mode_stack.push(LexerMode::Interpolate(i, 0, str_start));
+                        self.next();
+                        return;
+                    }
                 }
 
                 // escape sequences
                 (Some((i, '\\')), N | F) => {
                     push_prev_tok!();
 
-                    tok_kind = Some(TokenKind::EscapeSeq);
-                    tok_start = i;
-                    tok_end = i + 1;
+                    kind = Some(TokenKind::EscapeSeq);
+                    start = i;
+                    end = i + 1;
 
                     match self.next() {
                         Some((i, 
@@ -279,17 +370,17 @@ impl<'t> Lexer<'t> {
                             | 'b' 
                             | 'f'
                             | 'v' 
-                        )) => tok_end = i + 1,
+                        )) => end = i + 1,
 
                         Some((_, '\n')) => {
                             loop {
                                 match self.text.peek() {
                                     Some(&(i, ch)) if ch.is_whitespace() => {
-                                        tok_end = i + 1;
+                                        end = i + 1;
                                         self.next();
                                     }
 
-                                    None => return push_unterminated_str!(ich.0),
+                                    None => return push_unterminated_str!(),
                                     
                                     _ => break
                                 }
@@ -302,41 +393,42 @@ impl<'t> Lexer<'t> {
                             loop {
                                 match self.text.peek() {
                                     Some(&(i, ch)) if ch.is_whitespace() => {
-                                        tok_end = i + 1;
+                                        end = i + 1;
                                         self.next();
                                     }
 
-                                    None => return push_unterminated_str!(ich.0),
+                                    None => return push_unterminated_str!(),
                                     
                                     _ => break
                                 }
                             }
                         }
 
+                        // \xHH, HH <= 7F
                         Some((_, 'x')) => {
                             let mut valid = true;
 
                             // 0-7
                             match self.text.peek() {
-                                Some(&(i, ch)) if ('0'..='7').contains(&ch) => tok_end = i + 1,
+                                Some(&(i, ch)) if ('0'..='7').contains(&ch) => end = i + 1,
                                 
                                 Some(&(i, ch)) if ch.is_ascii_hexdigit() => {
-                                    errs.push(Token::new(
+                                    tokens.push(Token::new(
                                         TokenKind::Error(LexerErrorKind::OutOfRangeHexEscape),
-                                        Span::new(tok_start, i + if self.text.peek().is_none() { 1 } else { 2 }, self.source)));
+                                        Span::new(start, i + if self.text.peek().is_none() { 1 } else { 2 }, self.source)));
 
-                                    tok_kind = None;
+                                    kind = None;
                                     valid = false;
                                 }
                                 
-                                None => return push_unterminated_str!(ich.0),
+                                None => return push_unterminated_str!(),
 
                                 Some(&(i, _)) => {
-                                    errs.push(Token::new(
+                                    tokens.push(Token::new(
                                         TokenKind::Error(LexerErrorKind::InvalidEscapeSequence),
-                                        Span::new(tok_start, i + 1, self.source)));
+                                        Span::new(start, i + 1, self.source)));
                                     
-                                    tok_kind = None;
+                                    kind = None;
                                     valid = false;
                                 }
                             }
@@ -346,16 +438,16 @@ impl<'t> Lexer<'t> {
 
                                 // 0-F
                                 match self.text.peek() {
-                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => tok_end = i + 1,
+                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => end = i + 1,
                                     
-                                    None => return push_unterminated_str!(ich.0),
+                                    None => return push_unterminated_str!(),
                                     
                                     _ => {
-                                        errs.push(Token::new(
+                                        tokens.push(Token::new(
                                             TokenKind::Error(LexerErrorKind::InvalidEscapeSequence),
-                                            Span::new(tok_start, tok_end, self.source)));
+                                            Span::new(start, end, self.source)));
                                         
-                                        tok_kind = None;
+                                        kind = None;
                                         valid = false;
                                     }
                                 }
@@ -366,19 +458,20 @@ impl<'t> Lexer<'t> {
                             }
                         }
 
+                        // \uHHHH
                         Some((_, 'u')) => {
                             for _ in 0..4 {
                                 match self.text.peek() {
-                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => tok_end = i + 1,
+                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => end = i + 1,
 
-                                    None => return push_unterminated_str!(ich.0),
+                                    None => return push_unterminated_str!(),
 
                                     _ => {
-                                        errs.push(Token::new(
+                                        tokens.push(Token::new(
                                             TokenKind::Error(LexerErrorKind::InvalidEscapeSequence),
-                                            Span::new(tok_start, tok_end, self.source)));
+                                            Span::new(start, end, self.source)));
 
-                                        tok_kind = None;    
+                                        kind = None;    
                                         break
                                     }
                                 }
@@ -387,66 +480,57 @@ impl<'t> Lexer<'t> {
                             }
                         }
 
+                        // \UHHHHHH
                         Some((_, 'U')) => {
-                            for _ in 0..4 {
+                            for _ in 0..6 {
                                 match self.text.peek() {
-                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => tok_end = i + 1,
+                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => end = i + 1,
 
-                                    None => return push_unterminated_str!(ich.0),
+                                    None => return push_unterminated_str!(),
 
                                     _ => {
-                                        errs.push(Token::new(
+                                        tokens.push(Token::new(
                                             TokenKind::Error(LexerErrorKind::InvalidEscapeSequence),
-                                            Span::new(tok_start, tok_end, self.source)));
+                                            Span::new(start, end, self.source)));
                                             
-                                        tok_kind = None;
+                                        kind = None;
                                         break
                                     }
                                 }
 
                                 self.next();
                             }
-
-                            for _ in 0..2 {
-                                match self.text.peek() {
-                                    Some((i, ch)) if ch.is_ascii_hexdigit() => tok_end = i + 1,
-
-                                    None => return push_unterminated_str!(ich.0),
-
-                                    _ => break
-                                }
-
-                                self.next();
-                            }
                         }
 
-                        None => return push_unterminated_str!(ich.0),
+                        None => return push_unterminated_str!(),
 
                         Some((i, _)) => {
-                            errs.push(Token::new(
+                            tokens.push(Token::new(
                                 TokenKind::Error(LexerErrorKind::InvalidEscapeSequence),
-                                Span::new(tok_start, i + 1, self.source)));
+                                Span::new(start, i + 1, self.source)));
                             
-                            tok_kind = None;
+                            kind = None;
                         }
                     }
                 }
 
                 // any other character
                 (Some((i, _)), _) => {
-                    if let Some(true) = tok_kind.map(|kind| kind != TokenKind::StringSegment) {
+                    if let Some(true) | None = kind.map(|k| k != TokenKind::StringSegment) {
                         push_prev_tok!();
 
-                        tok_kind = Some(TokenKind::StringSegment);
-                        tok_start = i;
+                        kind = Some(TokenKind::StringSegment);
+                        start = i;
                     }
 
-                    tok_end = i + 1;
+                    end = i + 1;
                 }
 
                 // eof
-                (None, _) => return push_unterminated_str!(ich.0)
-            }  
+                (None, _) => return push_unterminated_str!()
+            } 
+
+            self.next(); 
         }
     }
 
@@ -642,6 +726,12 @@ impl<'t> Lexer<'t> {
         self.ich = self.text.next();
         self.ich
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LexerMode {
+    String(usize, StringPrefix),
+    Interpolate(usize, i32, usize) // (int_start, bracket_depth, parent string's str_start)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

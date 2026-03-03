@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut source_map = SourceMap::new();
     let main_source: SourceId = source_map.add_source(main_source);
     let content = source_map
-        .get_source_mut(main_source)
+        .get_source(main_source)
         .data()
         .to_owned();
 

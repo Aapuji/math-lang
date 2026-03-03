@@ -33,6 +33,3 @@ pub enum Type {
     Named(Token),
     // more
 }
-
-
-// TODO: Perhaps instead of calling `accept` before entering the individual parse functions, have the accept in the parse functions. Becaus then in the future if there is an error that originates at the initial token which gets accepted, we can store that.

@@ -46,6 +46,7 @@ pub enum LexerErrorKind {
     UnterminatedBlockComment,
     InvalidEscapeSequence,
     OutOfRangeHexEscape,
+    UnterminatedInterpolation
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,21 +85,3 @@ impl Token {
 }
 
 pub const OPERATOR_CHARSET: &'static str = "=:+-*/^%<>!&|~$?@\\";
-
-/* Default Operators
-    // 1 Char Operators
-    Plus, Minus, Star, Slash, Caret, Percent,
-    Bar, Amp, Bang, 
-    Less, Greater, 
-    Equal, Tilde, 
-    Colon,
-
-    // 2 Char Operators
-    PlusMinus, MinusPlus, DoubleSlash,
-    LessEq, GreaterEq, EqEq, BangEq, TildeEq,
-    LessColon, GreaterColon, ColonLess,
-    PlusEq, MinusEq, StarEq, SlashEq, CaretEq, BarEq, AmpEq,
-
-    // 3+ Char Operators
-    LessColonLess
-*/
