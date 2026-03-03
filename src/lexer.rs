@@ -1,5 +1,6 @@
 use std::iter::Peekable;
 use std::str::CharIndices;
+use std::sync::BarrierWaitResult;
 
 use unicode_ident::{is_xid_start, is_xid_continue};
 
@@ -35,7 +36,11 @@ impl<'t> Lexer<'t> {
                 if ch.is_ascii_digit() {
                     self.lex_number((i, ch), &mut tokens);
                 } else if ch == '"' {
-                    self.lex_string((i, ch), &mut tokens);
+                    self.lex_string((i, ch), &mut tokens, StringPrefix::None);
+                } else if ch == 'f' && matches!(self.text.peek(), Some(&(_, '"'))) {
+                    self.lex_string((i, ch), &mut tokens, StringPrefix::F);
+                } else if ch == 'r' && matches!(self.text.peek(), Some(&(_, '"'))) {
+                    self.lex_string((i, ch), &mut tokens, StringPrefix::R);
                 } else if ch.is_whitespace() {
                     self.next();
                 } else if ch == '#' {
@@ -199,31 +204,250 @@ impl<'t> Lexer<'t> {
         tokens.push(Token::new(kind, span));
     }
 
-    
-    fn lex_string(&mut self, ich: (usize, char), tokens: &mut Vec<Token>) {
-        let start = ich.0;
-        let end: usize;
+    fn lex_string(&mut self, ich: (usize, char), tokens: &mut Vec<Token>, prefix: StringPrefix) {
+        use StringPrefix::{None as N, F, R};
+        
+        let mut toks = vec![];
+        let mut errs = vec![];
 
-        loop {
-            match self.next() {
-                Some((i, ch)) if ch == '"' => {
-                    end = i + 1;
-                    self.next();
-                    break
-                }
+        let mut tok_kind = Some(TokenKind::StringStart);
+        let mut tok_start = ich.0;
+        let mut tok_end = ich.0 + if let N = prefix { 1 } else { self.next(); 2 };
 
-                Some(_) => {}
-
-                None => {
-                    tokens.push(Token::new(
-                        TokenKind::Error(LexerErrorKind::UnterminatedString),
-                        Span::new(start, self.len, self.source)));
+        macro_rules! push_prev_tok {
+            ( ) => {
+                if let Some(kind) = tok_kind {
+                    toks.push(Token::new(
+                        kind, 
+                        Span::new(tok_start, tok_end, self.source)));
+                    
+                    tok_kind = None;
+                    tok_start = tok_end;
                 }
             }
+        };
+
+        macro_rules! push_unterminated_str {
+            ( $start:expr ) => {
+                {
+                    tokens.append(&mut errs);
+                    tokens.push(Token::new(
+                        TokenKind::Error(LexerErrorKind::UnterminatedString),
+                        Span::new($start, self.len, self.source)));
+                }
+            };
         }
 
-        let span = Span::new(start, end, self.source);
-        tokens.push(Token::new(TokenKind::String, span));
+        loop {
+            match (self.next(), prefix) {
+                // end of string
+                (Some((i, '"')), _) => {
+                    push_prev_tok!();
+
+                    tok_start = i;
+                    tok_end = i + 1;
+
+                    self.next();
+
+                    if errs.is_empty() {
+                        tokens.append(&mut toks);
+                    } else {
+                        return tokens.append(&mut errs);
+                    }
+
+                    return tokens.push(Token::new(
+                        TokenKind::StringEnd,
+                        Span::new(tok_start, tok_end, self.source)));
+                }
+
+                // escape sequences
+                (Some((i, '\\')), N | F) => {
+                    push_prev_tok!();
+
+                    tok_kind = Some(TokenKind::EscapeSeq);
+                    tok_start = i;
+                    tok_end = i + 1;
+
+                    match self.next() {
+                        Some((i, 
+                            '0' 
+                            | '"' 
+                            | '\\' 
+                            | 'n' 
+                            | 'r'
+                            | 't'
+                            | 'b' 
+                            | 'f'
+                            | 'v' 
+                        )) => tok_end = i + 1,
+
+                        Some((_, '\n')) => {
+                            loop {
+                                match self.text.peek() {
+                                    Some(&(i, ch)) if ch.is_whitespace() => {
+                                        tok_end = i + 1;
+                                        self.next();
+                                    }
+
+                                    None => return push_unterminated_str!(ich.0),
+                                    
+                                    _ => break
+                                }
+                            }
+                        }
+
+                        Some((_, '\r')) if matches!(self.text.peek(), Some((_, '\n'))) => {
+                            self.next();
+
+                            loop {
+                                match self.text.peek() {
+                                    Some(&(i, ch)) if ch.is_whitespace() => {
+                                        tok_end = i + 1;
+                                        self.next();
+                                    }
+
+                                    None => return push_unterminated_str!(ich.0),
+                                    
+                                    _ => break
+                                }
+                            }
+                        }
+
+                        Some((_, 'x')) => {
+                            let mut valid = true;
+
+                            // 0-7
+                            match self.text.peek() {
+                                Some(&(i, ch)) if ('0'..='7').contains(&ch) => tok_end = i + 1,
+                                
+                                Some(&(i, ch)) if ch.is_ascii_hexdigit() => {
+                                    errs.push(Token::new(
+                                        TokenKind::Error(LexerErrorKind::OutOfRangeHexEscape),
+                                        Span::new(tok_start, i + if self.text.peek().is_none() { 1 } else { 2 }, self.source)));
+
+                                    tok_kind = None;
+                                    valid = false;
+                                }
+                                
+                                None => return push_unterminated_str!(ich.0),
+
+                                Some(&(i, _)) => {
+                                    errs.push(Token::new(
+                                        TokenKind::Error(LexerErrorKind::InvalidEscapeSequence),
+                                        Span::new(tok_start, i + 1, self.source)));
+                                    
+                                    tok_kind = None;
+                                    valid = false;
+                                }
+                            }
+
+                            if valid {
+                                self.next();
+
+                                // 0-F
+                                match self.text.peek() {
+                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => tok_end = i + 1,
+                                    
+                                    None => return push_unterminated_str!(ich.0),
+                                    
+                                    _ => {
+                                        errs.push(Token::new(
+                                            TokenKind::Error(LexerErrorKind::InvalidEscapeSequence),
+                                            Span::new(tok_start, tok_end, self.source)));
+                                        
+                                        tok_kind = None;
+                                        valid = false;
+                                    }
+                                }
+
+                                if valid {
+                                    self.next();
+                                }
+                            }
+                        }
+
+                        Some((_, 'u')) => {
+                            for _ in 0..4 {
+                                match self.text.peek() {
+                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => tok_end = i + 1,
+
+                                    None => return push_unterminated_str!(ich.0),
+
+                                    _ => {
+                                        errs.push(Token::new(
+                                            TokenKind::Error(LexerErrorKind::InvalidEscapeSequence),
+                                            Span::new(tok_start, tok_end, self.source)));
+
+                                        tok_kind = None;    
+                                        break
+                                    }
+                                }
+
+                                self.next();
+                            }
+                        }
+
+                        Some((_, 'U')) => {
+                            for _ in 0..4 {
+                                match self.text.peek() {
+                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => tok_end = i + 1,
+
+                                    None => return push_unterminated_str!(ich.0),
+
+                                    _ => {
+                                        errs.push(Token::new(
+                                            TokenKind::Error(LexerErrorKind::InvalidEscapeSequence),
+                                            Span::new(tok_start, tok_end, self.source)));
+                                            
+                                        tok_kind = None;
+                                        break
+                                    }
+                                }
+
+                                self.next();
+                            }
+
+                            for _ in 0..2 {
+                                match self.text.peek() {
+                                    Some((i, ch)) if ch.is_ascii_hexdigit() => tok_end = i + 1,
+
+                                    None => return push_unterminated_str!(ich.0),
+
+                                    _ => break
+                                }
+
+                                self.next();
+                            }
+                        }
+
+                        None => return push_unterminated_str!(ich.0),
+
+                        Some((i, _)) => {
+                            errs.push(Token::new(
+                                TokenKind::Error(LexerErrorKind::InvalidEscapeSequence),
+                                Span::new(tok_start, i + 1, self.source)));
+                            
+                            tok_kind = None;
+                        }
+                    }
+                }
+
+                // any other character
+                (Some((i, _)), _) => {
+                    if let Some(true) = tok_kind.map(|kind| kind != TokenKind::StringSegment) {
+                        push_prev_tok!();
+
+                        tok_kind = Some(TokenKind::StringSegment);
+                        tok_start = i;
+                    }
+
+                    tok_end = i + 1;
+                }
+
+                // eof
+                (None, _) => return push_unterminated_str!(ich.0)
+            }  
+        }
     }
 
     // Note: Does not perform any normalization. But, that still must be done to make sure all identifiers are normalized accoridng to NFC (use unicode-normalization crate). Eg. e and aigu-mark should be normalized to e-aigu.
@@ -418,4 +642,11 @@ impl<'t> Lexer<'t> {
         self.ich = self.text.next();
         self.ich
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StringPrefix {
+    None,
+    F,
+    R
 }

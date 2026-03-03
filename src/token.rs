@@ -3,10 +3,13 @@ use crate::source::{SourceId, Span};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     Ident, // follows regex: [a-zA-Z\][a-zA-Z0-9_]*
-    String,
     Int,
     Real,
     Complex,
+
+    // Strings
+    StringStart, StringSegment, StringEnd,
+    EscapeSeq, InterpolateStart, InterpolateEnd,
 
     DocComment,
 
@@ -40,7 +43,9 @@ pub enum TokenKind {
 pub enum LexerErrorKind {
     UnknownCharacter,
     UnterminatedString,
-    UnterminatedBlockComment
+    UnterminatedBlockComment,
+    InvalidEscapeSequence,
+    OutOfRangeHexEscape,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

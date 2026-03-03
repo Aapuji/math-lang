@@ -341,12 +341,12 @@ impl Parser {
                 ident
             }
 
-            TokenKind::String => {
-                let string = Expr::String(*self.current());
-                self.advance();
+            // TokenKind::String => {
+            //     let string = Expr::String(*self.current());
+            //     self.advance();
 
-                string
-            }
+            //     string
+            // }
 
             _ => todo!("{:?}", self.current_kind())
         }
