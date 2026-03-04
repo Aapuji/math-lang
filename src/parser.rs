@@ -1,7 +1,7 @@
 use std::iter::{Chain, Peekable, Repeat, repeat};
 use std::vec::IntoIter;
 
-use crate::ast::{Expr, Stmt, Type};
+use crate::ast::{Expr, Stmt, StringPart, Type};
 use crate::source::SourceMap;
 use crate::token::{Token, TokenKind};
 
@@ -35,7 +35,6 @@ impl Parser {
 
         while !self.at_end() {            
             stmts.push(self.parse_stmt(source_map));
-            self.advance();
         }
 
         stmts
@@ -263,7 +262,6 @@ impl Parser {
         while self.current_kind() != TokenKind::RBrace {
             if self.starts_non_expr_stmt() {
                 let stmt = self.parse_non_expr_stmt(source_map);
-                self.expect(TokenKind::Semicolon);
                 stmts.push(stmt);
             } else {
                 let expr = self.parse_expr(source_map);
@@ -282,7 +280,7 @@ impl Parser {
     }
 
     fn parse_call(&mut self, source_map: &SourceMap) -> Expr {
-        let expr = self.parse_primary();
+        let expr = self.parse_primary(source_map);
 
         if self.accept(TokenKind::LParen) {
             self.finish_call(source_map, expr)
@@ -311,7 +309,7 @@ impl Parser {
         Expr::Call(Box::new(callee), args)
     }
 
-    fn parse_primary(&mut self) -> Expr {
+    fn parse_primary(&mut self, source_map: &SourceMap) -> Expr {
         match self.current_kind() {
             TokenKind::Int => {
                 let expr = Expr::Int(*self.current());
@@ -341,12 +339,73 @@ impl Parser {
                 ident
             }
 
-            // TokenKind::String => {
-            //     let string = Expr::String(*self.current());
-            //     self.advance();
+            TokenKind::StringStart => {
+                self.advance();
 
-            //     string
-            // }
+                let src = source_map
+                    .get_source(self.current().span().source_id())
+                    .data();
+                let mut parts = vec![];
+                let mut cur_text = String::new();
+
+                loop {
+                    let token = self.current();
+                    let slice = &src[token.span().range()];
+
+                    match token.kind() {
+                        TokenKind::StringSegment => {
+                            cur_text.push_str(slice);
+                            self.advance();
+                        }
+
+                        TokenKind::EscapeSeq => {
+                            cur_text.push(match slice {
+                                "\\0"  => '\0',
+                                "\\\"" => '\"',
+                                "\\\\" => '\\',
+                                "\\n"  => '\n',
+                                "\\r"  => '\r',
+                                "\\t"  => '\t',
+                                "\\b"  => '\x08',
+                                "\\f"  => '\x0c',
+                                "\\v"  => '\x0b',
+                                _ => unreachable!()
+                            });
+                            self.advance();
+                        }
+
+                        TokenKind::InterpolateStart => {
+                            if !cur_text.is_empty() {
+                                parts.push(StringPart::Text(cur_text));
+                                cur_text = String::new();
+                            }
+                            
+                            self.advance();
+                            parts.push(StringPart::Expr(self.parse_expr(source_map)));
+                        }
+
+                        TokenKind::InterpolateEnd => {
+                            self.advance();
+                        },
+                        
+                        TokenKind::StringEnd => {
+                            if !cur_text.is_empty() {
+                                parts.push(StringPart::Text(cur_text));
+                                cur_text = String::new();
+                            }
+
+                            self.advance();
+                            break
+                        }
+
+                        TokenKind::Error(_) => todo!("parse error in string"),
+
+                        _ => unreachable!()
+                    }
+                }
+
+                Expr::String(parts)
+            }
 
             _ => todo!("{:?}", self.current_kind())
         }

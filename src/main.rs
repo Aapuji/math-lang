@@ -33,12 +33,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let tokens = lexer.lex(&mut source_map);
 
     println!("{:#?}", tokens);
-    // println!("\n== AST ==");
+    println!("\n== AST ==");
 
-    // let parser = Parser::new(tokens);
-    // let stmts = parser.parse(&mut source_map);
+    let parser = Parser::new(tokens);
+    let stmts = parser.parse(&mut source_map);
 
-    // println!("{:#?}", stmts);
+    println!("{:#?}", stmts);
 
     Ok(())
 }

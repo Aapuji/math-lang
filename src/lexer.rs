@@ -187,6 +187,8 @@ impl<'t> Lexer<'t> {
                         
                         None => ()
                     }
+
+                    self.mode_stack.pop();
                 }
 
                 tokens.push(Token::eof(self.len, self.source));
@@ -278,10 +280,6 @@ impl<'t> Lexer<'t> {
         macro_rules! push_unterminated_str {
             ( ) => {
                 {
-                    tokens.push(Token::new(
-                        TokenKind::Error(LexerErrorKind::UnterminatedString),
-                        Span::new(str_start, self.len, self.source)));
-                    
                     while !self.mode_stack.is_empty() {
                         match self.mode_stack.last() {
                             Some(LexerMode::String(str_start, _)) => {
@@ -332,10 +330,12 @@ impl<'t> Lexer<'t> {
                         } else {
                             push_prev_tok!();
 
-                            kind = Some(TokenKind::StringStart);
+                            kind = Some(TokenKind::StringSegment);
                             start = i - 1;
                             end = i + 1;
                         }
+
+                        self.next();
                     } else { // todo: format specifiers (width, etc.)?
                         push_prev_tok!();
 
@@ -729,14 +729,14 @@ impl<'t> Lexer<'t> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LexerMode {
-    String(usize, StringPrefix),
-    Interpolate(usize, i32, usize) // (int_start, bracket_depth, parent string's str_start)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StringPrefix {
     None,
     F,
     R
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LexerMode {
+    String(usize, StringPrefix),
+    Interpolate(usize, i32, usize) // (int_start, bracket_depth, parent string's str_start)
 }

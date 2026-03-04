@@ -14,7 +14,7 @@ pub enum Stmt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     Ident(Token),
-    String(Token),
+    String(Vec<StringPart>),
     Int(Token),
     Real(Token),
     Complex(Token),
@@ -32,4 +32,10 @@ pub enum Expr {
 pub enum Type {
     Named(Token),
     // more
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StringPart {
+    Text(String),        // converts escape sequences
+    Expr(Expr)
 }
