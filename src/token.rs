@@ -1,4 +1,4 @@
-use crate::source::{SourceId, Span};
+use crate::source::{SourceId, SourceMap, Span};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
@@ -6,7 +6,7 @@ pub enum TokenKind {
     Int,
     Real,
     Sci,    // '<real>e<+|-><nat>' 
-    Complex,
+    Imag,
 
     // Strings
     StringStart, StringSegment, StringEnd,
@@ -43,6 +43,7 @@ pub enum TokenKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LexerErrorKind {
     UnknownCharacter,
+    InvalidScientificLiteral,
     UnterminatedString,
     UnterminatedBlockComment,
     InvalidEscapeSequence,
@@ -82,6 +83,10 @@ impl Token {
 
     pub fn set_span_start(&mut self, start: usize) {
         self.span.set_start(start);
+    }
+
+    pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str {
+        &source_map.get_source(self.span.source_id()).data()[self.span.range()]
     }
 }
 

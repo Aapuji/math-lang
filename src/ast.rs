@@ -1,6 +1,6 @@
 use crate::token::Token;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Let(Token, Option<Vec<(Token, Option<Type>)>>, Option<Type>, Option<Expr>),
     LetMany(Vec<Token>, Option<Type>, Option<Expr>),
@@ -11,13 +11,13 @@ pub enum Stmt {
     Expr(Expr),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Ident(Token),
     String(Vec<StringPart>),
-    Int(Token),
-    Real(Token),
-    Complex(Token),
+    Int(rug::Integer),
+    Real(rug::Rational),
+    Imag(rug::Rational),
     Block(Vec<Stmt>, Option<Box<Expr>>),
     Call(Box<Expr>, Vec<Expr>),
     LetIn(Token, Option<Vec<(Token, Option<Type>)>>, Option<Type>, Option<Box<Expr>>, Box<Expr>),
@@ -34,7 +34,7 @@ pub enum Type {
     // more
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum StringPart {
     Text(String),        // converts escape sequences
     Expr(Expr)

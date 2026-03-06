@@ -1,6 +1,8 @@
 use std::iter::{Chain, Peekable, Repeat, repeat};
 use std::vec::IntoIter;
 
+use rug::{Integer, Rational};
+
 use crate::ast::{Expr, Stmt, StringPart, Type};
 use crate::source::SourceMap;
 use crate::token::{Token, TokenKind};
@@ -309,27 +311,55 @@ impl Parser {
         Expr::Call(Box::new(callee), args)
     }
 
-    fn parse_primary(&mut self, source_map: &SourceMap) -> Expr {
+    fn parse_primary(&mut self, source_map: &SourceMap) -> Expr {        
         match self.current_kind() {
-            TokenKind::Int => {
-                let expr = Expr::Int(*self.current());
+            TokenKind::Int => {;
+                let number = self.current().get_lexeme(source_map).replace('_', "");
+                let expr = Expr::Int(Integer::parse(number).unwrap().into());
                 self.advance();
 
                 expr
             }
 
             TokenKind::Real => {
-                let expr = Expr::Real(*self.current());
+                let mut reached_decimal = false;
+                let mut denom_size = 1;
+                let fraction = self
+                    .current()
+                    .get_lexeme(source_map)
+                    .chars()
+                    .filter(|&d| d != '_')
+                    .fold(String::from("/1"), |mut acc, e| {
+                        if e != '.' {
+                            acc.insert(acc.len() - denom_size - 1, e);
+
+                            if reached_decimal {
+                                acc.push('0');
+                                denom_size += 1;
+                            }
+                        } else {
+                            reached_decimal = true;
+                        }
+
+                        acc
+                    });
+
+                let expr = Expr::Real(Rational::parse(fraction).unwrap().into());
                 self.advance();
 
                 expr
             }
 
-            TokenKind::Complex => {
-                let expr = Expr::Complex(*self.current());
-                self.advance();
+            TokenKind::Sci => {
+                todo!()
+            }
 
-                expr
+            TokenKind::Imag => {
+                todo!();
+                // let expr = Expr::Complex(*self.current());
+                // self.advance();
+
+                // expr
             }
 
             TokenKind::Ident => {

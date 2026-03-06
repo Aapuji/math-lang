@@ -108,7 +108,7 @@ impl<'t> Lexer<'t> {
                     self.next();
                 } else if ch == 'i' && !matches!(self.text.peek(), Some(&(_, c)) if is_xid_start(c) || c == '_') {
                     tokens.push(Token::new(
-                        TokenKind::Complex,
+                        TokenKind::Imag,
                         Span::new(i, i + 1, self.source)));
                     self.next();
                 } else if is_xid_start(ch) || ch == '_' {
@@ -210,13 +210,13 @@ impl<'t> Lexer<'t> {
                     end = i + 1;
                 }
 
-                Some((i, ch)) if ch == '.' && kind == TokenKind::Int => {
+                Some((i, '.')) if kind == TokenKind::Int => {
                     match self.text.peek() {
                         // decimal
                         Some((i, ch)) if ch.is_ascii_digit() => {
                             end = i + 1;
-                            self.next();
                             kind = TokenKind::Real;
+                            self.next();
                         }
 
                         _ => {
@@ -226,11 +226,38 @@ impl<'t> Lexer<'t> {
                     }
                 }
 
-                Some((i, ch)) if ch == 'i' => {
+                Some((i, 'i')) => {
                     end = i + 1;
-                    kind = TokenKind::Complex;
+                    kind = TokenKind::Imag;
                     self.next();
                     break
+                }
+
+                Some((i, 'e' | 'E')) => {
+                    end = i + 1;
+                    kind = TokenKind::Sci;
+
+                    match self.next() {
+                        Some((i, '+' | '-')) => {
+                            end = i + 1;
+
+                            match self.next() {
+                                Some((i, ch)) if ch.is_ascii_digit() => {
+                                    end = i + 1;
+                                }
+
+                                _ => return tokens.push(Token::new(
+                                    TokenKind::Error(LexerErrorKind::InvalidScientificLiteral),
+                                    Span::new(start, end, self.source)))
+                            }
+                        }
+
+                        Some((_, ch)) if ch.is_ascii_digit() => (),
+
+                        _ => return tokens.push(Token::new(
+                            TokenKind::Error(LexerErrorKind::InvalidScientificLiteral),
+                            Span::new(start, end, self.source))),
+                    }
                 }
 
                 Some((i, _)) => {
