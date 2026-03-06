@@ -2,9 +2,10 @@ use crate::source::{SourceId, Span};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
-    Ident, // follows regex: [a-zA-Z\][a-zA-Z0-9_]*
+    Ident,  // follows regex: [a-zA-Z\][a-zA-Z0-9_]*
     Int,
     Real,
+    Sci,    // '<real>e<+|-><nat>' 
     Complex,
 
     // Strings
@@ -29,8 +30,8 @@ pub enum TokenKind {
     Semicolon,
 
     // Keywords
-    Let, Var, Const, Fn, Sym, Alias, In,
-    For, While, If, Else, Match, When, Using,
+    Let, Var, Const, Fn, Sym, Enum, Struct, Alias,
+    For, While, If, Else, Match, When, Using, In,
     And, Or, Not, As,
     SlashIn,
 
