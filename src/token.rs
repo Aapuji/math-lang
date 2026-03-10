@@ -5,7 +5,7 @@ pub enum TokenKind {
     Ident,  // follows regex: [a-zA-Z\][a-zA-Z0-9_]*
     Int,
     Real,
-    Sci,    // '<real>e<+|-><nat>' 
+    Sci,    // '<real>e[+|-]<nat>' 
     Imag,
 
     // Strings

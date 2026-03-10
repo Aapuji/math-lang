@@ -1,7 +1,8 @@
 use std::iter::{Chain, Peekable, Repeat, repeat};
+use std::ops::{Index, Sub, SubAssign};
 use std::vec::IntoIter;
 
-use rug::{Integer, Rational};
+use rug::{Complete, Integer, Rational};
 
 use crate::ast::{Expr, Stmt, StringPart, Type};
 use crate::source::SourceMap;
@@ -324,7 +325,7 @@ impl Parser {
             TokenKind::Real => {
                 let mut reached_decimal = false;
                 let mut denom_size = 1;
-                let fraction = self
+                let mut fraction = self
                     .current()
                     .get_lexeme(source_map)
                     .chars()
@@ -344,6 +345,10 @@ impl Parser {
                         acc
                     });
 
+                if fraction.len() == 2 {
+                    fraction.insert(0, '1');
+                }
+
                 let expr = Expr::Real(Rational::parse(fraction).unwrap().into());
                 self.advance();
 
@@ -351,7 +356,58 @@ impl Parser {
             }
 
             TokenKind::Sci => {
-                todo!()
+                #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+                enum ExpDir {
+                    Pos,
+                    Neg,
+                    None
+                }
+
+                let mut reached_decimal = false;
+                let mut reached_exponent = false;
+                let mut exponent_direction = ExpDir::None;
+                let mut denom_size = 1;
+                let mut fraction = String::from("/1");
+                let lexeme = self.current().get_lexeme(source_map);
+                let mut sep = lexeme.find(['e', 'E']).unwrap();
+
+                for i in 0..sep {
+                    let ch = &lexeme[i..=i];
+
+                    if ch != "." {
+                        fraction.insert_str(fraction.len() - denom_size - 1, ch);
+
+                        if reached_decimal {
+                            fraction.push('0');
+                            denom_size += 1;
+                        }
+                    } else {
+                        reached_decimal = true;
+                    }
+                }
+
+                if &lexeme[sep+1..=sep+1] == "-" {
+                    exponent_direction = ExpDir::Neg;
+                    sep += 1;
+                } else if &lexeme[sep+1..=sep+1] == "+" {
+                    exponent_direction = ExpDir::Pos;
+                    sep += 1;
+                } else {
+                    exponent_direction = ExpDir::Pos;
+                }
+
+                // Exponent portion must fit in a usize
+                let int = (&lexeme[sep+1..]).parse::<usize>().unwrap();
+                if let ExpDir::Pos = exponent_direction {
+                    fraction.insert_str(fraction.len() - denom_size - 1, &"0".repeat(int));
+                } else {
+                    fraction.push_str(&"0".repeat(int));
+                }
+
+                let expr = Expr::Real(Rational::parse(fraction).unwrap().into());
+                self.advance();
+
+                expr
             }
 
             TokenKind::Imag => {
