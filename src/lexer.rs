@@ -568,7 +568,13 @@ impl<'t> Lexer<'t> {
 
         loop {
             match self.next() {
-                Some((i, ch)) if is_xid_continue(ch) || ch == '_' => end = i + 1,
+                Some((_, ch)) if is_xid_continue(ch) || ch == '_' => {}
+                Some((i, '\\')) => {
+                    match self.text.peek() {
+                        Some(&(_, ch)) if is_xid_continue(ch) || ch == '_' => (),
+                        _ => { end = i; break } 
+                    }
+                }
                 Some((i, _)) => { end = i; break }
                 None => break
             }
