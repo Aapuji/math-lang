@@ -360,12 +360,10 @@ impl Parser {
                 enum ExpDir {
                     Pos,
                     Neg,
-                    None
                 }
 
                 let mut reached_decimal = false;
-                let mut reached_exponent = false;
-                let mut exponent_direction = ExpDir::None;
+                let exponent_direction;
                 let mut denom_size = 1;
                 let mut fraction = String::from("/1");
                 let lexeme = self.current().get_lexeme(source_map);
@@ -411,11 +409,45 @@ impl Parser {
             }
 
             TokenKind::Imag => {
-                todo!();
-                // let expr = Expr::Complex(*self.current());
-                // self.advance();
+                let lexeme = self.current().get_lexeme(source_map);
 
-                // expr
+                if lexeme == "i" {
+                    let expr = Expr::Imag(Rational::ONE.to_owned());
+                    self.advance();
+
+                    expr
+                } else {
+                    let lexeme = &lexeme[..lexeme.len()-1];
+
+                    let mut reached_decimal = false;
+                    let mut denom_size = 1;
+                    let mut fraction = lexeme
+                        .chars()
+                        .filter(|&d| d != '_')
+                        .fold(String::from("/1"), |mut acc, e| {
+                            if e != '.' {
+                                acc.insert(acc.len() - denom_size - 1, e);
+
+                                if reached_decimal {
+                                    acc.push('0');
+                                    denom_size += 1;
+                                }
+                            } else {
+                                reached_decimal = true;
+                            }
+
+                            acc
+                        });
+
+                    if fraction.len() == 2 {
+                        fraction.insert(0, '1');
+                    }
+
+                    let expr = Expr::Imag(Rational::parse(fraction).unwrap().into());
+                    self.advance();
+
+                    expr
+                }
             }
 
             TokenKind::Ident => {
