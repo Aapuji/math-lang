@@ -120,15 +120,37 @@ impl Parser {
 
                 if names.len() == 1 {
                     Stmt::Expr(if is_def {
-                        Expr::DefIn(names[0], args, ty, Box::new(def.unwrap()), Box::new(expr))
+                        Expr::DefIn {
+                            name: names[0],
+                            args, 
+                            ty, 
+                            def: Box::new(def.unwrap()),
+                            expr: Box::new(expr)
+                        }
                     } else {
-                        Expr::LetIn(names[0], args, ty, def.map(Box::new), Box::new(expr))
+                        Expr::LetIn {
+                            name: names[0],
+                            args,
+                            ty,
+                            value: def.map(Box::new),
+                            expr: Box::new(expr)
+                        }
                     })
                 } else {
                     Stmt::Expr(if is_def {
-                        Expr::DefManyIn(names, ty, Box::new(def.unwrap()), Box::new(expr))
+                        Expr::DefManyIn {
+                            names,
+                            ty,
+                            def: Box::new(def.unwrap()),
+                            expr: Box::new(expr)
+                        }
                     } else {
-                        Expr::LetManyIn(names, ty, def.map(Box::new), Box::new(expr))
+                        Expr::LetManyIn {
+                            names,
+                            ty,
+                            value: def.map(Box::new),
+                            expr: Box::new(expr)
+                        }
                     })
                 }
             } else {
@@ -136,15 +158,33 @@ impl Parser {
 
                 if names.len() == 1 {
                     if is_def {
-                        Stmt::Def(names[0], args, ty, def.unwrap())
+                        Stmt::Def {
+                            name: names[0],
+                            args,
+                            ty,
+                            def: def.unwrap()
+                        }
                     } else {
-                        Stmt::Let(names[0], args, ty, def)
+                        Stmt::Let {
+                            name: names[0],
+                            args,
+                            ty,
+                            value: def
+                        }
                     }
                 } else {
                     if is_def {
-                        Stmt::DefMany(names, ty, def.unwrap())
+                        Stmt::DefMany {
+                            names,
+                            ty,
+                            def: def.unwrap()
+                        }
                     } else {
-                        Stmt::LetMany(names, ty, def)
+                        Stmt::LetMany {
+                            names,
+                            ty,
+                            value: def
+                        }
                     }
                 }
             }
@@ -172,10 +212,19 @@ impl Parser {
                 let expr = self.parse_expr(source_map);
                 self.expect(TokenKind::Semicolon);
 
-                Stmt::Expr(Expr::VarIn(name, ty, def.map(Box::new), Box::new(expr)))
+                Stmt::Expr(Expr::VarIn {
+                    name,
+                    ty,
+                    value: def.map(Box::new),
+                    expr: Box::new(expr)
+                })
             } else {
                 self.expect(TokenKind::Semicolon);
-                Stmt::Var(name, ty, def)
+                Stmt::Var {
+                    name,
+                    ty,
+                    value: def
+                }
             }
         } else {
             todo!()
@@ -201,10 +250,19 @@ impl Parser {
                 let expr = self.parse_expr(source_map);
                 self.expect(TokenKind::Semicolon);
 
-                Stmt::Expr(Expr::ConstIn(name, ty, def.map(Box::new), Box::new(expr)))
+                Stmt::Expr(Expr::ConstIn {
+                    name,
+                    ty,
+                    value: def.map(Box::new),
+                    expr: Box::new(expr)
+                })
             } else {
                 self.expect(TokenKind::Semicolon);
-                Stmt::Const(name, ty, def)
+                Stmt::Const {
+                    name,
+                    ty,
+                    value: def
+                }
             }
         } else {
             todo!()
@@ -279,7 +337,7 @@ impl Parser {
         }
 
         self.expect(TokenKind::RBrace);
-        Expr::Block(stmts, tail)
+        Expr::Block { stmts, tail }
     }
 
     fn parse_call(&mut self, source_map: &SourceMap) -> Expr {
@@ -309,7 +367,10 @@ impl Parser {
             }
         }
 
-        Expr::Call(Box::new(callee), args)
+        Expr::Call {
+            callee: Box::new(callee),
+            args
+        }
     }
 
     fn parse_primary(&mut self, source_map: &SourceMap) -> Expr {        

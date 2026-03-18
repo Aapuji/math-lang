@@ -2,12 +2,38 @@ use crate::token::Token;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
-    Let(Token, Option<Vec<(Token, Option<Type>)>>, Option<Type>, Option<Expr>),
-    LetMany(Vec<Token>, Option<Type>, Option<Expr>),
-    Def(Token, Option<Vec<(Token, Option<Type>)>>, Option<Type>, Expr),
-    DefMany(Vec<Token>, Option<Type>, Expr),
-    Var(Token, Option<Type>, Option<Expr>),
-    Const(Token, Option<Type>, Option<Expr>),
+    Let {
+        name: Token,
+        args: Option<Vec<(Token, Option<Type>)>>,
+        ty: Option<Type>,
+        value: Option<Expr>
+    },
+    LetMany {
+        names: Vec<Token>,
+        ty: Option<Type>,
+        value: Option<Expr>
+    },
+    Def {
+        name: Token,
+        args: Option<Vec<(Token, Option<Type>)>>,
+        ty: Option<Type>,
+        def: Expr
+    },
+    DefMany {
+        names: Vec<Token>,
+        ty: Option<Type>,
+        def: Expr
+    },
+    Var {
+        name: Token,
+        ty: Option<Type>,
+        value: Option<Expr>
+    },
+    Const {
+        name: Token,
+        ty: Option<Type>,
+        value: Option<Expr>
+    },
     Expr(Expr),
 }
 
@@ -18,14 +44,52 @@ pub enum Expr {
     Int(rug::Integer),
     Real(rug::Rational),
     Imag(rug::Rational),
-    Block(Vec<Stmt>, Option<Box<Expr>>),
-    Call(Box<Expr>, Vec<Expr>),
-    LetIn(Token, Option<Vec<(Token, Option<Type>)>>, Option<Type>, Option<Box<Expr>>, Box<Expr>),
-    LetManyIn(Vec<Token>, Option<Type>, Option<Box<Expr>>, Box<Expr>),
-    DefIn(Token, Option<Vec<(Token, Option<Type>)>>, Option<Type>, Box<Expr>, Box<Expr>),
-    DefManyIn(Vec<Token>, Option<Type>, Box<Expr>, Box<Expr>),
-    VarIn(Token, Option<Type>, Option<Box<Expr>>, Box<Expr>),
-    ConstIn(Token, Option<Type>, Option<Box<Expr>>, Box<Expr>)
+    Block {
+        stmts: Vec<Stmt>,
+        tail: Option<Box<Expr>>
+    },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>
+    },
+    LetIn {
+        name: Token,
+        args: Option<Vec<(Token, Option<Type>)>>,
+        ty: Option<Type>,
+        value: Option<Box<Expr>>,
+        expr: Box<Expr>
+    },
+    LetManyIn {
+        names: Vec<Token>,
+        ty: Option<Type>,
+        value: Option<Box<Expr>>,
+        expr: Box<Expr>
+    },
+    DefIn {
+        name: Token,
+        args: Option<Vec<(Token, Option<Type>)>>,
+        ty: Option<Type>,
+        def: Box<Expr>,
+        expr: Box<Expr>
+    },
+    DefManyIn {
+        names: Vec<Token>,
+        ty: Option<Type>,
+        def: Box<Expr>,
+        expr: Box<Expr>
+    },
+    VarIn {
+        name: Token,
+        ty: Option<Type>,
+        value: Option<Box<Expr>>,
+        expr: Box<Expr>
+    },
+    ConstIn {
+        name: Token,
+        ty: Option<Type>,
+        value: Option<Box<Expr>>,
+        expr: Box<Expr>
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
