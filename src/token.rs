@@ -32,7 +32,7 @@ pub enum TokenKind {
     // Keywords
     Let, Var, Const, Fn, Sym, Macro, Enum, Struct, Alias,
     For, While, If, Else, Match, When, Using, In,
-    And, Or, Not, As,
+    And, Or, Xor, Not, As,
     SlashIn, SlashNotIn,
 
     Error(LexerErrorKind),

@@ -606,9 +606,11 @@ impl<'t> Lexer<'t> {
                 "in" => tokens.push(Token::new(TokenKind::In, span)),
                 "and" => tokens.push(Token::new(TokenKind::And, span)),
                 "or" => tokens.push(Token::new(TokenKind::Or, span)),
+                "xor" => tokens.push(Token::new(TokenKind::Xor, span)),
                 "not" => tokens.push(Token::new(TokenKind::Not, span)),
                 "as" => tokens.push(Token::new(TokenKind::As, span)),
                 "∈" => tokens.push(Token::new(TokenKind::SlashIn, span)),
+                "∉" => tokens.push(Token::new(TokenKind::SlashNotIn, span)),
                 _ => tokens.push(Token::new(TokenKind::Ident, span))
             }
         } else {

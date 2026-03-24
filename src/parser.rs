@@ -312,7 +312,7 @@ impl Parser {
         if self.accept(TokenKind::LBrace) {
             self.parse_block(source_map)
         } else {
-            self.parse_call(source_map)
+            self.parse_or(source_map)
         }
     }
 
@@ -338,6 +338,117 @@ impl Parser {
 
         self.expect(TokenKind::RBrace);
         Expr::Block { stmts, tail }
+    }
+
+    fn parse_or(&mut self, source_map: &SourceMap) -> Expr {
+        let lhs = self.parse_xor(source_map);
+
+        if self.accept(TokenKind::Or) {
+            let rhs = Box::new(self.parse_or(source_map));
+
+            Expr::Or {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else {
+            lhs
+        }
+    }
+
+    fn parse_xor(&mut self, source_map: &SourceMap) -> Expr {
+        let lhs = self.parse_and(source_map);
+
+        if self.accept(TokenKind::Xor) {
+            let rhs = Box::new(self.parse_xor(source_map));
+
+            Expr::Xor {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else {
+            lhs
+        }
+    }
+
+    fn parse_and(&mut self, source_map: &SourceMap) -> Expr {
+        let lhs = self.parse_not(source_map);
+
+        if self.accept(TokenKind::And) {
+            let rhs = Box::new(self.parse_and(source_map));
+
+            Expr::And {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else {
+            lhs
+        }
+    }
+
+    fn parse_not(&mut self, source_map: &SourceMap) -> Expr {
+        if self.accept(TokenKind::Not) {
+            Expr::Not(Box::new(self.parse_not(source_map)))
+        } else {
+            self.parse_comparison(source_map)
+        }
+    }
+
+    fn parse_comparison(&mut self, source_map: &SourceMap) -> Expr {
+        let lhs = self.parse_additive(source_map);
+
+        macro_rules! parse_comparison {
+            ($node_kind:ident) => {
+                {
+                    let rhs = self.parse_comparison(source_map);
+                    if let Some((lhsr, _)) = rhs.is_comparison_node() {
+                        Expr::And {
+                            lhs: Box::new(Expr::$node_kind {
+                                lhs: Box::new(lhs),
+                                rhs: lhsr.to_owned()
+                            }),
+                            rhs: Box::new(rhs)
+                        }
+                    } else if let Expr::And { lhs: ref lhsr, .. } = rhs {
+                        if let Some((lhsr, _)) = lhsr.is_comparison_node() {
+                            Expr::And {
+                                lhs: Box::new(Expr::$node_kind {
+                                    lhs: Box::new(lhs),
+                                    rhs: lhsr.to_owned()
+                                }),
+                                rhs: Box::new(rhs)
+                            }
+                        } else {
+                            unreachable!()
+                        }
+                    } else {
+                        Expr::$node_kind {
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs)
+                        }
+                    }
+                }
+            };
+        }
+
+        if self.accept_op(source_map, "==") {
+            parse_comparison!(Eq)
+        } else if self.accept_op(source_map, "!=") {
+            parse_comparison!(NotEq)
+        } else if self.accept_op(source_map, "<") {
+            parse_comparison!(Less)
+        } else if self.accept_op(source_map, ">") {
+            parse_comparison!(Greater)
+        } else if self.accept_op(source_map, "<=") {
+            parse_comparison!(LessEq)
+        } else if self.accept_op(source_map, ">=") {
+            parse_comparison!(GreaterEq)
+        } else {
+            lhs
+        }
+    }
+
+    fn parse_additive(&mut self, source_map: &SourceMap) -> Expr {
+        self.parse_call(source_map)
     }
 
     fn parse_call(&mut self, source_map: &SourceMap) -> Expr {
@@ -375,7 +486,7 @@ impl Parser {
 
     fn parse_primary(&mut self, source_map: &SourceMap) -> Expr {        
         match self.current_kind() {
-            TokenKind::Int => {;
+            TokenKind::Int => {
                 let number = self.current().get_lexeme(source_map).replace('_', "");
                 let expr = Expr::Int(Integer::parse(number).unwrap().into());
                 self.advance();
@@ -678,6 +789,55 @@ impl Parser {
         }
     }
 }
+
+// TODO: Change Recursive Descent Parser into Pratt Parser for expressions
+
+/* Precedence Levels            Associativity
+LOWEST
+->                              N
+or                              L
+xor                             L
+and                             L
+not                             _
+== != < > <= >= \in \notin      L
++ - +- -+                       L
+* / // % %%                     L
+^                               R
+user (like `1:f`)               N
+unary                           _
+index                           L
+call                            L
+()                              N
+HIGHEST                 
+*/
+// #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+// enum ExprPrec {
+//     Lambda,
+//     Or,
+//     Xor,
+//     And,
+//     Not,
+//     Comparison, // note that it is parsed differently due to comparison chaining
+//     Additive,
+//     Multiplicative,
+//     Exponentative,
+//     User, // ident or non-builtin oper or oplit
+//     Unary,
+//     Index,
+//     Call,
+//     Dot,
+//     Group
+// }
+
+// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// enum ExprAssoc {
+//     Left,
+//     Right, 
+//     None
+// }
+
+
+
 
 
 // TODO: Error detection and synchronization

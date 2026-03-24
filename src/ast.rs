@@ -8,13 +8,6 @@ pub enum Stmt {
         ty: Option<Type>,
         value: Option<Expr>
     },
-    LetFn {
-        name: Token,
-        ty_args: Option<Vec<Generic>>,
-        args: Vec<(Token, Option<Type>)>,
-        ty: Option<Type>,
-        value: Option<Expr>
-    },
     LetMany {
         names: Vec<Token>,
         ty: Option<Type>,
@@ -24,12 +17,6 @@ pub enum Stmt {
         name: Token,
         args: Option<Vec<(Token, Option<Type>)>>,
         ty: Option<Type>,
-        def: Expr
-    },
-    DefFn {
-        name: Token,
-        ty_args: Option<Vec<Generic>>,
-        args: Vec<(Token, Option<Type>)>,
         def: Expr
     },
     DefMany {
@@ -50,11 +37,6 @@ pub enum Stmt {
     Expr(Expr),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Generic {
-    name: Token
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Ident(Token),
@@ -65,6 +47,43 @@ pub enum Expr {
     Block {
         stmts: Vec<Stmt>,
         tail: Option<Box<Expr>>
+    },
+    Or {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    Xor {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    And {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    Not(Box<Expr>),
+    Eq {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    NotEq {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    Less {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    Greater {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    LessEq {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    GreaterEq {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
     },
     Call {
         callee: Box<Expr>,
@@ -107,6 +126,20 @@ pub enum Expr {
         ty: Option<Type>,
         value: Option<Box<Expr>>,
         expr: Box<Expr>
+    }
+}
+
+impl Expr {
+    pub fn is_comparison_node(&self) -> Option<(&Box<Expr>, &Box<Expr>)> {
+        match self {
+            Expr::Eq { lhs, rhs }        |
+            Expr::NotEq { lhs, rhs }     |
+            Expr::Less { lhs, rhs }      |
+            Expr::Greater { lhs, rhs }   |
+            Expr::LessEq { lhs, rhs }    |
+            Expr::GreaterEq { lhs, rhs } => Some((lhs, rhs)),
+            _ => None
+        }
     }
 }
 
