@@ -4,7 +4,7 @@ use std::vec::IntoIter;
 
 use rug::{Complete, Integer, Rational};
 
-use crate::ast::{Expr, Stmt, StringPart, Type};
+use crate::ast::{Expr, Operation, Stmt, StringPart, Type};
 use crate::source::SourceMap;
 use crate::token::{Token, TokenKind};
 
@@ -448,6 +448,168 @@ impl Parser {
     }
 
     fn parse_additive(&mut self, source_map: &SourceMap) -> Expr {
+        let lhs = self.parse_multiplicative(source_map);
+
+        if self.accept_op(source_map, "+") {
+            let rhs = Box::new(self.parse_additive(source_map));
+
+            Expr::Plus {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else if self.accept_op(source_map, "-") {
+            let rhs = Box::new(self.parse_additive(source_map));
+
+            Expr::Minus {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else if self.accept_op(source_map, "+-") {
+            let rhs = Box::new(self.parse_additive(source_map));
+
+            Expr::PlusMinus {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else if self.accept_op(source_map, "-+") {
+            let rhs = Box::new(self.parse_additive(source_map));
+
+            Expr::MinusPlus {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else {
+            lhs
+        }
+    }
+
+    fn parse_multiplicative(&mut self, source_map: &SourceMap) -> Expr {
+        let lhs = self.parse_exponentative(source_map);
+
+        if self.accept_op(source_map, "*") {
+            let rhs = Box::new(self.parse_multiplicative(source_map));
+
+            Expr::Times {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else if self.accept_op(source_map, "/") {
+            let rhs = Box::new(self.parse_multiplicative(source_map));
+
+            Expr::Divide {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else if self.accept_op(source_map, "//") {
+            let rhs = Box::new(self.parse_multiplicative(source_map));
+
+            Expr::IntDivide {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else if self.accept_op(source_map, "%") {
+            let rhs = Box::new(self.parse_multiplicative(source_map));
+
+            Expr::Mod {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else if self.accept_op(source_map, "%%") {
+            let rhs = Box::new(self.parse_multiplicative(source_map));
+
+            Expr::ModClass {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else {
+            lhs
+        }
+    }
+
+    fn parse_exponentative(&mut self, source_map: &SourceMap) -> Expr {
+        let lhs = self.parse_custom_operator(source_map);
+
+        if self.accept_op(source_map, "^") {
+            let rhs = Box::new(self.parse_exponentative(source_map));
+
+            Expr::Exp {
+                lhs: Box::new(lhs),
+                rhs
+            }
+        } else {
+            lhs
+        }
+    }
+
+    fn parse_custom_operator(&mut self, source_map: &SourceMap) -> Expr {
+        match self.current_kind() {
+            // prefix operation
+            TokenKind::Operator => {
+                let operator = self.current().to_owned();
+                self.advance();
+
+                Expr::Prefix {
+                    operator: Operation::Custom(operator),
+                    operand: Box::new(self.parse_unary(source_map))
+                }
+            }
+
+            // ident as prefix operation
+            TokenKind::Ident if 
+                !matches!(self.peek_kind(), TokenKind::Operator |
+                                            TokenKind::Dot      |
+                                            TokenKind::Comma    |
+                                            TokenKind::Semicolon|
+                                            TokenKind::LParen   |   // `f (x)` is a function call.
+                                            TokenKind::RParen   |   // To have it be an operation,
+                                            TokenKind::LBracket |   // use `f {x}`.
+                                            TokenKind::RBracket |
+                                            TokenKind::RBrace   |
+                                            TokenKind::Backtick |
+                                            TokenKind::EOF)
+                && !self.peek_kind().is_keyword() => {
+                let operator = self.current().to_owned();
+                self.advance();
+
+                Expr::Prefix {
+                    operator: Operation::Ident(operator),
+                    operand: Box::new(self.parse_unary(source_map))
+                }
+            }
+
+            // // operator literal as prefix operation
+            // TokenKind::Backtick
+
+            // potential ident/operation as infix operation
+            _ => {
+                let lhs = self.parse_unary(source_map);
+
+                if let TokenKind::Ident = self.current_kind() {
+                    let operator = self.current().to_owned();
+                    self.advance();
+
+                    Expr::Infix {
+                        lhs: Box::new(lhs),
+                        operator: Operation::Ident(operator),
+                        rhs: Box::new(self.parse_unary(source_map))
+                    }
+                } else if !self.current().is_builtin_operator(source_map) {
+                    let operator = self.current().to_owned();
+                    self.advance();
+
+                    Expr::Infix {
+                        lhs: Box::new(lhs),
+                        operator: Operation::Custom(operator),
+                        rhs: Box::new(self.parse_unary(source_map))
+                    }
+                } else {
+                    lhs
+                }
+            }
+        }
+    }
+
+    fn parse_unary(&mut self, source_map: &SourceMap) -> Expr {
         self.parse_call(source_map)
     }
 

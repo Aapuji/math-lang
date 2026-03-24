@@ -85,6 +85,55 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>
     },
+    Plus {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    Minus {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    PlusMinus {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    MinusPlus {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    Times {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    Divide {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    IntDivide {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    Mod {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    ModClass {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    }, 
+    Exp {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>
+    },
+    Prefix {
+        operator: Operation,
+        operand: Box<Expr>
+    },
+    Infix {
+        lhs: Box<Expr>,
+        operator: Operation,
+        rhs: Box<Expr>
+    },
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>
@@ -147,6 +196,13 @@ impl Expr {
 pub enum Type {
     Named(Token),
     // more
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operation {
+    Ident(Token),
+    Custom(Token),
+    OpLit(Token),
 }
 
 #[derive(Debug, Clone, PartialEq)]

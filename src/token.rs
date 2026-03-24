@@ -30,7 +30,8 @@ pub enum TokenKind {
     Semicolon,
 
     // Keywords
-    Let, Var, Const, Fn, Sym, Macro, Enum, Struct, Alias,
+    Let, Var, Const, Fn, Sym, Enum, Struct, 
+    Macro, Decor, Alias,
     For, While, If, Else, Match, When, Using, In,
     And, Or, Xor, Not, As,
     SlashIn, SlashNotIn,
@@ -38,6 +39,41 @@ pub enum TokenKind {
     Error(LexerErrorKind),
     
     EOF // has length 0
+}
+
+impl TokenKind {
+    pub fn is_keyword(&self) -> bool {
+        use TokenKind::*;
+        
+        match self {
+            Let        |
+            Var        |
+            Const      |
+            Fn         |
+            Sym        |
+            Enum       |
+            Struct     |
+            Macro      |
+            Decor      |
+            Alias      | 
+            For        |
+            While      |
+            If         |
+            Else       |
+            Match      |
+            When       |
+            Using      |
+            In         |
+            And        |
+            Or         |
+            Xor        |
+            Not        |
+            As         |
+            SlashIn    |
+            SlashNotIn => true,
+            _ => false
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +102,21 @@ impl Token {
         Self {
             kind: TokenKind::EOF,
             span: Span::new(i, i, source_id)
+        }
+    }
+
+    pub fn is_builtin_operator(&self, source_map: &SourceMap) -> bool {
+        match self.get_lexeme(source_map) {
+            "->"  |
+            "or"  |
+            "xor" |
+            "and" |
+            "not" |
+            "=="  | "!=" | "<" | ">" | "<=" | ">=" | "∈" | "\\in" | "∉" | "\\notin" |
+            "+"   | "-" | "+-" | "-+" |
+            "*"   | "/" | "//" | "%" | "%%" |
+            "^"   => true,
+            _ => false
         }
     }
 
