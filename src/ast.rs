@@ -8,6 +8,13 @@ pub enum Stmt {
         ty: Option<Type>,
         value: Option<Expr>
     },
+    LetFn {
+        name: Token,
+        ty_args: Option<Vec<Generic>>,
+        args: Vec<(Token, Option<Type>)>,
+        ty: Option<Type>,
+        value: Option<Expr>
+    },
     LetMany {
         names: Vec<Token>,
         ty: Option<Type>,
@@ -17,6 +24,12 @@ pub enum Stmt {
         name: Token,
         args: Option<Vec<(Token, Option<Type>)>>,
         ty: Option<Type>,
+        def: Expr
+    },
+    DefFn {
+        name: Token,
+        ty_args: Option<Vec<Generic>>,
+        args: Vec<(Token, Option<Type>)>,
         def: Expr
     },
     DefMany {
@@ -35,6 +48,11 @@ pub enum Stmt {
         value: Option<Expr>
     },
     Expr(Expr),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Generic {
+    name: Token
 }
 
 #[derive(Debug, Clone, PartialEq)]

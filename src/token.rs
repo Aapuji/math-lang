@@ -30,10 +30,10 @@ pub enum TokenKind {
     Semicolon,
 
     // Keywords
-    Let, Var, Const, Fn, Sym, Enum, Struct, Alias,
+    Let, Var, Const, Fn, Sym, Macro, Enum, Struct, Alias,
     For, While, If, Else, Match, When, Using, In,
     And, Or, Not, As,
-    SlashIn,
+    SlashIn, SlashNotIn,
 
     Error(LexerErrorKind),
     

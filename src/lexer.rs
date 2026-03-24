@@ -592,6 +592,7 @@ impl<'t> Lexer<'t> {
                 "const" => tokens.push(Token::new(TokenKind::Const, span)),
                 "fn" => tokens.push(Token::new(TokenKind::Fn, span)),
                 "sym" => tokens.push(Token::new(TokenKind::Sym, span)),
+                "macro" => tokens.push(Token::new(TokenKind::Macro, span)),
                 "enum" => tokens.push(Token::new(TokenKind::Enum, span)),
                 "struct" => tokens.push(Token::new(TokenKind::Struct, span)),
                 "alias" => tokens.push(Token::new(TokenKind::Alias, span)),
@@ -614,6 +615,7 @@ impl<'t> Lexer<'t> {
             match &text[start..end] {
                 // TODO: Need to also lex some specially allowed math tokens, like ∈ as identifiers.
                 "in" => tokens.push(Token::new(TokenKind::SlashIn, span)),
+                "notin" => tokens.push(Token::new(TokenKind::SlashNotIn, span)),
                 _ => tokens.push(Token::new(TokenKind::Ident, span)),
             }
         }
