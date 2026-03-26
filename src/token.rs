@@ -105,6 +105,18 @@ impl Token {
         }
     }
 
+    pub fn can_be_operator(&self, source_map: &SourceMap) -> bool {
+        match self.kind {
+            TokenKind::Operator   |
+            TokenKind::Or         |
+            TokenKind::Xor        |
+            TokenKind::Not        |
+            TokenKind::SlashIn    |
+            TokenKind::SlashNotIn => true,
+            _ => false
+        }
+    }
+
     pub fn is_builtin_operator(&self, source_map: &SourceMap) -> bool {
         match self.get_lexeme(source_map) {
             "->"  |

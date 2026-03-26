@@ -577,12 +577,25 @@ impl Parser {
                 }
             }
 
-            // // operator literal as prefix operation
-            // TokenKind::Backtick
+            // operator literal as prefix operation
+            TokenKind::Backtick => {
+                self.advance();
+
+                if let Ok(name) = self.parse_operator_literal(source_map, "1") {
+                    Expr::Prefix {
+                        operator: Operation::OpLit(name),
+                        operand: Box::new(self.parse_unary(source_map))
+                    }
+                } else {
+                    todo!("after error with backtick")
+                }
+            }
 
             // potential ident/operation as infix operation
             _ => {
                 let lhs = self.parse_unary(source_map);
+
+                println!("NOW HERE BEFORE BRANCH: {:?}", self.current());
 
                 if let TokenKind::Ident = self.current_kind() {
                     let operator = self.current().to_owned();
@@ -593,7 +606,19 @@ impl Parser {
                         operator: Operation::Ident(operator),
                         rhs: Box::new(self.parse_unary(source_map))
                     }
-                } else if !self.current().is_builtin_operator(source_map) {
+                } else if self.accept(TokenKind::Backtick) {
+                    if let Ok(name) = self.parse_operator_literal(source_map, "2") {
+                        println!("HERE: {:?}", self.current_kind());
+                        
+                        Expr::Infix {
+                            lhs: Box::new(lhs),
+                            operator: Operation::OpLit(name),
+                            rhs: Box::new(self.parse_unary(source_map))
+                        }
+                    } else {
+                        todo!("after error with backtick")
+                    }
+                } else if self.current().can_be_operator(source_map) && !self.current().is_builtin_operator(source_map) {
                     let operator = self.current().to_owned();
                     self.advance();
 
@@ -606,6 +631,31 @@ impl Parser {
                     lhs
                 }
             }
+        }
+    }
+
+    fn parse_operator_literal(&mut self, source_map: &SourceMap, req_arity: &str) -> Result<Token, ()> {
+        if let TokenKind::Int = self.current_kind() {
+            let arity = self.current().get_lexeme(source_map);
+            self.advance();
+
+            self.expect_op(source_map, ":");
+
+            if let TokenKind::Ident = self.current_kind() {
+                let name = self.current().to_owned();
+                self.advance();
+                self.expect(TokenKind::Backtick);
+
+                if arity != req_arity {
+                    todo!("report error for invalid operator literal")
+                }
+
+                Ok(name)
+            } else {
+                todo!("report error for invalid operator literal")
+            }
+        } else {
+            todo!("report error for invalid operator literal")
         }
     }
 
@@ -887,6 +937,30 @@ impl Parser {
         }
     }
 
+    /// Checks if the current token matches the given `TokenKind`. If so, it advances to the next token and outputs the passed `Token`. If not, it outputs `None`.
+    fn take(&mut self, kind: TokenKind) -> Option<Token> {
+        if kind == self.current_kind() {
+            let token = *self.current();
+            self.advance();
+            
+            Some(token)
+        } else {
+            None
+        }
+    }
+
+    /// Checks if the current token matches the given `TokenKind`. If so, it advances to the next token and outputs the passed `Token`. If not, it outputs `None`.
+    fn take_op(&mut self, source_map: &SourceMap, op: &str) -> Option<Token> {        
+        if self.current_op(source_map)? == op {
+            let token = *self.current();
+            self.advance();
+            
+            Some(token)
+        } else {
+            None
+        }
+    }
+
     /// Expects that the current token matches the given `TokenKind`. If so, it advances and outputs true. Otherwise it reports an error and outputs `false`.
     fn expect(&mut self, kind: TokenKind) -> bool {
         if self.accept(kind) {
@@ -904,6 +978,24 @@ impl Parser {
         } else {
             self.error(self.current_kind());
             false
+        }
+    }
+
+    fn require(&mut self, kind: TokenKind) -> Option<Token> {
+        if let Some(token) = self.take(kind) {
+            Some(token)
+        } else {
+            self.error(self.current_kind());
+            None
+        }
+    }
+
+    fn require_op(&mut self, source_map: &SourceMap, op: &str) -> Option<Token> {
+        if let Some(token) = self.take_op(source_map, op) {
+            Some(token)
+        } else {
+            self.error(self.current_kind());
+            None
         }
     }
 
