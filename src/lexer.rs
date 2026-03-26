@@ -141,11 +141,6 @@ impl<'t> Lexer<'t> {
                             self.next();
                         }
                     }
-                } else if ch == '@' && !matches!(self.text.peek(), Some(&(_, c)) if OPERATOR_CHARSET.contains(c)) {
-                    tokens.push(Token::new(
-                        TokenKind::At,
-                        Span::new(i, i + 1, self.source)));
-                    self.next();
                 } else if ch == '.' && !matches!(self.text.peek(), Some(&(_, c)) if OPERATOR_CHARSET.contains(c)) {
                     tokens.push(Token::new(
                         TokenKind::Dot,
