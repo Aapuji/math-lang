@@ -542,15 +542,77 @@ impl Parser {
     }
 
     fn parse_custom_operator(&mut self, source_map: &SourceMap) -> Expr {
+        macro_rules! parse_potentially_infix {
+            ($lhs:expr) => {
+                if let TokenKind::Ident = self.current_kind() {
+                    let operator = self.current().to_owned();
+                    self.advance();
+
+                    let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                        unary
+                    } else {
+                        self.parse_index(source_map)
+                    };
+
+                    Expr::Infix {
+                        lhs: Box::new($lhs),
+                        operator: Operation::Ident(operator),
+                        rhs: Box::new(rhs)
+                    }
+                } else if self.accept(TokenKind::Backtick) {
+                    if let Ok(name) = self.parse_operator_literal(source_map, "2") {                        
+                        let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                            unary
+                        } else {
+                            self.parse_index(source_map)
+                        };
+
+                        Expr::Infix {
+                            lhs: Box::new($lhs),
+                            operator: Operation::OpLit(name),
+                            rhs: Box::new(rhs)
+                        }
+                    } else {
+                        todo!("after error with backtick")
+                    }
+                } else if self.current().can_be_operator(source_map) && !self.current().is_builtin_operator(source_map) {
+                    let operator = self.current().to_owned();
+                    self.advance();
+
+                    let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                        unary
+                    } else {
+                        self.parse_index(source_map)
+                    };
+
+                    Expr::Infix {
+                        lhs: Box::new($lhs),
+                        operator: Operation::Custom(operator),
+                        rhs: Box::new(rhs)
+                    }
+                } else {
+                    $lhs
+                }
+            }
+        }
+        
         match self.current_kind() {
             // prefix operation
             TokenKind::Operator => {
-                let operator = self.current().to_owned();
-                self.advance();
+                if let Some(unary) = self.parse_builtin_unary(source_map) {
+                    parse_potentially_infix!(unary)
+                } else {
+                    let operator = self.current().to_owned();
+                    self.advance();
 
-                Expr::Prefix {
-                    operator: Operation::Custom(operator),
-                    operand: Box::new(self.parse_unary(source_map))
+                    Expr::Prefix {
+                        operator: Operation::Custom(operator),
+                        operand: Box::new(if let Some(unary) = self.parse_builtin_unary(source_map) {
+                            unary
+                        } else {
+                            self.parse_index(source_map)
+                        })
+                    }
                 }
             }
 
@@ -573,7 +635,11 @@ impl Parser {
 
                 Expr::Prefix {
                     operator: Operation::Ident(operator),
-                    operand: Box::new(self.parse_unary(source_map))
+                    operand: Box::new(if let Some(unary) = self.parse_builtin_unary(source_map) {
+                        unary
+                    } else {
+                        self.parse_index(source_map)
+                    })
                 }
             }
 
@@ -584,7 +650,11 @@ impl Parser {
                 if let Ok(name) = self.parse_operator_literal(source_map, "1") {
                     Expr::Prefix {
                         operator: Operation::OpLit(name),
-                        operand: Box::new(self.parse_unary(source_map))
+                        operand: Box::new(if let Some(unary) = self.parse_builtin_unary(source_map) {
+                            unary
+                        } else {
+                            self.parse_index(source_map)
+                        })
                     }
                 } else {
                     todo!("after error with backtick")
@@ -593,73 +663,41 @@ impl Parser {
 
             // potential ident/operation as infix operation
             _ => {
-                let lhs = self.parse_unary(source_map);
-
-                println!("NOW HERE BEFORE BRANCH: {:?}", self.current());
-
-                if let TokenKind::Ident = self.current_kind() {
-                    let operator = self.current().to_owned();
-                    self.advance();
-
-                    Expr::Infix {
-                        lhs: Box::new(lhs),
-                        operator: Operation::Ident(operator),
-                        rhs: Box::new(self.parse_unary(source_map))
-                    }
-                } else if self.accept(TokenKind::Backtick) {
-                    if let Ok(name) = self.parse_operator_literal(source_map, "2") {
-                        println!("HERE: {:?}", self.current_kind());
-                        
-                        Expr::Infix {
-                            lhs: Box::new(lhs),
-                            operator: Operation::OpLit(name),
-                            rhs: Box::new(self.parse_unary(source_map))
-                        }
-                    } else {
-                        todo!("after error with backtick")
-                    }
-                } else if self.current().can_be_operator(source_map) && !self.current().is_builtin_operator(source_map) {
-                    let operator = self.current().to_owned();
-                    self.advance();
-
-                    Expr::Infix {
-                        lhs: Box::new(lhs),
-                        operator: Operation::Custom(operator),
-                        rhs: Box::new(self.parse_unary(source_map))
-                    }
+                let lhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                    unary
                 } else {
-                    lhs
-                }
+                    self.parse_index(source_map)
+                };
+
+                parse_potentially_infix!(lhs)
             }
         }
     }
 
     fn parse_operator_literal(&mut self, source_map: &SourceMap, req_arity: &str) -> Result<Token, ()> {
-        if let TokenKind::Int = self.current_kind() {
-            let arity = self.current().get_lexeme(source_map);
+        if let TokenKind::Ident = self.current_kind() {
+            let name = self.current().to_owned();
             self.advance();
+            self.expect(TokenKind::Backtick);
 
-            self.expect_op(source_map, ":");
-
-            if let TokenKind::Ident = self.current_kind() {
-                let name = self.current().to_owned();
-                self.advance();
-                self.expect(TokenKind::Backtick);
-
-                if arity != req_arity {
-                    todo!("report error for invalid operator literal")
-                }
-
-                Ok(name)
-            } else {
-                todo!("report error for invalid operator literal")
-            }
+            Ok(name)
         } else {
             todo!("report error for invalid operator literal")
         }
     }
 
-    fn parse_unary(&mut self, source_map: &SourceMap) -> Expr {
+    /// Attempts to parse a built-in unary expression. If it succeeds, it outputs the expression. If it cannot find a built-in unary operator, it returns None.
+    fn parse_builtin_unary(&mut self, source_map: &SourceMap) -> Option<Expr> {
+        if self.accept_op(source_map, "+") {
+            Some(Expr::UnaryPlus(Box::new(self.parse_index(source_map))))
+        } else if self.accept_op(source_map, "-") {
+            Some(Expr::Neg(Box::new(self.parse_index(source_map))))
+        } else {
+            None
+        }
+    }
+
+    fn parse_index(&mut self, source_map: &SourceMap) -> Expr {
         self.parse_call(source_map)
     }
 
@@ -907,6 +945,40 @@ impl Parser {
                 }
 
                 Expr::String(parts)
+            }
+
+            TokenKind::LParen => {
+                self.advance();
+
+                if self.accept(TokenKind::RParen) {
+                    Expr::Unit
+                } else {
+                    let expr = self.parse_expr(source_map);
+
+                    if self.accept(TokenKind::RParen) {
+                        expr
+                    } else if self.expect(TokenKind::Comma) {
+                        let mut exprs = vec![expr];
+
+                        if self.accept(TokenKind::RParen) {
+                            Expr::Tuple(exprs)
+                        } else {
+                            loop {
+                                exprs.push(self.parse_expr(source_map));
+
+                                if self.accept(TokenKind::RParen) {
+                                    break Expr::Tuple(exprs)
+                                } else if self.expect(TokenKind::Comma) {
+                                    ()
+                                } else {
+                                    todo!()
+                                }
+                            }
+                        }
+                    } else {
+                        todo!()
+                    }
+                } 
             }
 
             _ => todo!("{:?}", self.current_kind())

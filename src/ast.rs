@@ -134,10 +134,14 @@ pub enum Expr {
         operator: Operation,
         rhs: Box<Expr>
     },
+    UnaryPlus(Box<Expr>),
+    Neg(Box<Expr>),
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>
     },
+    Unit,
+    Tuple(Vec<Expr>),
     LetIn {
         name: Token,
         args: Option<Vec<(Token, Option<Type>)>>,
