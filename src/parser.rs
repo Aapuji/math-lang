@@ -1,8 +1,8 @@
 use std::iter::{Chain, Peekable, Repeat, repeat};
-use std::ops::{Index, Sub, SubAssign};
+use std::os::unix::raw::pid_t;
 use std::vec::IntoIter;
 
-use rug::{Complete, Integer, Rational};
+use rug::{Integer, Rational};
 
 use crate::ast::{Expr, Operation, Stmt, StringPart, Type};
 use crate::source::SourceMap;
@@ -56,6 +56,7 @@ impl Parser {
             TokenKind::Let => self.parse_let(source_map),
             TokenKind::Var => self.parse_var(source_map),
             TokenKind::Const => self.parse_const(source_map),
+            TokenKind::Fn => self.parse_fn(source_map),
             _ => todo!()
         }
     }
@@ -67,44 +68,11 @@ impl Parser {
             let mut names = vec![*self.current()];
             self.advance();
 
-            let args = if self.accept(TokenKind::LParen) {
-                let mut args = vec![];
-                
-                loop {
-                    if let TokenKind::Ident = self.current_kind() {
-                        let arg = *self.current();
-                        self.advance();
-
-                        let ty = if self.accept_op(source_map, ":") {
-                            Some(self.parse_type())
-                        } else { None };
-
-                        args.push((arg, ty));
-
-                        if self.accept(TokenKind::Comma) && self.accept(TokenKind::RParen) 
-                            || self.accept(TokenKind::RParen) {
-                            break
-                        }
-                    } else if self.accept(TokenKind::RParen) {
-                        break
-                    } else {
-                        todo!()
-                    }
-                }
-
-                Some(args)
-            } else {
-                while self.accept(TokenKind::Comma) {
-                    names.push(*self.current());
-                    self.advance();
-                }
-
-                None
-            };
-
-            let ty = if self.accept_op(source_map, ":") {
-                Some(self.parse_type())
+            let args = if let TokenKind::LParen = self.current_kind() {
+                Some(self.parse_args_def(source_map))
             } else { None };
+
+            let ty = self.parse_type_annotation(source_map);
 
             let mut is_def = false;
             let def = if self.accept_op(source_map, "=") {
@@ -200,9 +168,7 @@ impl Parser {
             let name = *self.current();
             self.advance();
 
-            let ty = if self.accept_op(source_map, ":") {
-                Some(self.parse_type())
-            } else { None };
+            let ty = self.parse_type_annotation(source_map);
 
             let def = if self.accept_op(source_map, "=") {
                 Some(self.parse_expr(source_map))
@@ -238,9 +204,7 @@ impl Parser {
             let name = *self.current();
             self.advance();
 
-            let ty = if self.accept_op(source_map, ":") {
-                Some(self.parse_type())
-            } else { None };
+            let ty = self.parse_type_annotation(source_map);
 
             let def = if self.accept_op(source_map, "=") {
                 Some(self.parse_expr(source_map))
@@ -269,11 +233,75 @@ impl Parser {
         }
     }
 
-    fn parse_type(&mut self) -> Type {
-        self.parse_primary_type()
+    fn parse_fn(&mut self, source_map: &SourceMap) -> Stmt {
+        self.accept(TokenKind::Fn);
+
+        if let Some(name) = self.take(TokenKind::Ident) {
+            // TODO: generic args
+            self.expect(TokenKind::LParen);
+
+            let args = self.parse_args_def(source_map);
+            // self.expect(TokenKind::RParen);
+
+            let ty = self.parse_type_annotation(source_map);
+
+            let value = if self.accept_op(source_map, "=") {
+                let expr = self.parse_expr(source_map);
+
+                self.expect(TokenKind::Semicolon);
+                expr
+            } else {
+                self.expect(TokenKind::LBrace);
+                self.parse_block(source_map)
+            };
+
+            Stmt::Fn { name, args, ty, value }
+        } else {
+            todo!("error expected identifier")
+        }
     }
 
-    fn parse_primary_type(&mut self) -> Type {
+    fn parse_args_def(&mut self, source_map: &SourceMap) -> Vec<(Token, Option<Type>)> {
+        let mut args = vec![];
+        
+        loop {
+            if let Some(arg) = self.take(TokenKind::Ident) {
+                let ty = self.parse_type_annotation(source_map);
+                args.push((arg, ty));
+
+                if self.accept(TokenKind::RParen)
+                    || (self.accept(TokenKind::Comma) && self.accept(TokenKind::RParen)) {
+                    break
+                }
+            } else if self.accept(TokenKind::RParen) {
+                break
+            } else {
+                todo!()
+            }
+        }
+
+        // self.expect(TokenKind::RParen);
+        args
+    }
+
+    /// Attempts to parse a type annotation. Either it will be a regular type annotation, or an implicit refinement type annotation, or there may be no type annotation, in which it will output None.
+    fn parse_type_annotation(&mut self, source_map: &SourceMap) -> Option<Type> {
+        // : T
+        if self.accept_op(source_map, ":") {
+            Some(self.parse_type(source_map))
+        // :: r
+        } else if self.accept_op(source_map, "::") {
+            todo!()
+        } else {
+            None
+        }
+    }
+
+    fn parse_type(&mut self, source_map: &SourceMap) -> Type {
+        self.parse_primary_type(source_map)
+    }
+
+    fn parse_primary_type(&mut self, source_map: &SourceMap) -> Type {
         match self.current_kind() {
             TokenKind::Ident => {
                 let ty = Type::Named(*self.current());

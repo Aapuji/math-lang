@@ -15,8 +15,10 @@ pub enum TokenKind {
     DocComment,
 
     Operator, // any operator
-    Backtick,
     
+    At,
+    DblAt,
+    Backtick,
     Underscore,
 
     // Separators

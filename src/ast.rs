@@ -34,6 +34,12 @@ pub enum Stmt {
         ty: Option<Type>,
         value: Option<Expr>
     },
+    Fn {
+        name: Token,
+        args: Vec<(Token, Option<Type>)>,
+        ty: Option<Type>,
+        value: Expr
+    },
     Expr(Expr),
 }
 

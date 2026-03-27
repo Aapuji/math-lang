@@ -141,6 +141,22 @@ impl<'t> Lexer<'t> {
                             self.next();
                         }
                     }
+                } else if ch == '@' && !matches!(self.text.peek(), Some(&(_, c)) if OPERATOR_CHARSET.contains(c)) {
+                    tokens.push(Token::new(
+                        TokenKind::At,
+                        Span::new(i, i + 1, self.source)));
+                        self.next();
+                } else if ch == '@' && matches!(self.text.peek(), Some(&(_, '@'))) {
+                    self.next();
+
+                    if matches!(self.text.peek(), Some(&(_, c)) if OPERATOR_CHARSET.contains(c)) {
+                        self.lex_operator((i, ch), &mut tokens);
+                    } else {
+                        tokens.push(Token::new(
+                            TokenKind::DblAt,
+                            Span::new(i, i + 2, self.source)));
+                        self.next();
+                    }
                 } else if ch == '.' && !matches!(self.text.peek(), Some(&(_, c)) if OPERATOR_CHARSET.contains(c)) {
                     tokens.push(Token::new(
                         TokenKind::Dot,
