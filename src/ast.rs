@@ -4,6 +4,7 @@ use crate::token::Token;
 pub enum Stmt {
     Let {
         name: Token,
+        ty_args: Option<Vec<Generic>>,
         args: Option<Vec<(Token, Option<Type>)>>,
         ty: Option<Type>,
         value: Option<Expr>
@@ -15,6 +16,7 @@ pub enum Stmt {
     },
     Def {
         name: Token,
+        ty_args: Option<Vec<Generic>>,
         args: Option<Vec<(Token, Option<Type>)>>,
         ty: Option<Type>,
         def: Expr
@@ -36,6 +38,7 @@ pub enum Stmt {
     },
     Fn {
         name: Token,
+        ty_args: Option<Vec<Generic>>,
         args: Vec<(Token, Option<Type>)>,
         ty: Option<Type>,
         value: Expr
@@ -151,6 +154,7 @@ pub enum Expr {
     Tuple(Vec<Expr>),
     LetIn {
         name: Token,
+        ty_args: Option<Vec<Generic>>,
         args: Option<Vec<(Token, Option<Type>)>>,
         ty: Option<Type>,
         value: Option<Box<Expr>>,
@@ -164,6 +168,7 @@ pub enum Expr {
     },
     DefIn {
         name: Token,
+        ty_args: Option<Vec<Generic>>,
         args: Option<Vec<(Token, Option<Type>)>>,
         ty: Option<Type>,
         def: Box<Expr>,
@@ -186,6 +191,14 @@ pub enum Expr {
         ty: Option<Type>,
         value: Option<Box<Expr>>,
         expr: Box<Expr>
+    },
+    FnIn {
+        name: Token,
+        ty_args: Option<Vec<Generic>>,
+        args: Vec<(Token, Option<Type>)>,
+        ty: Option<Type>,
+        value: Box<Expr>,
+        expr: Box<Expr>
     }
 }
 
@@ -207,6 +220,11 @@ impl Expr {
 pub enum Type {
     Named(Token),
     // more
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Generic {
+    pub name: Token,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
