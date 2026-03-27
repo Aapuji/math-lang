@@ -1,1 +1,1 @@
-fn printMany(msg: String, n: Int): Void = 5;
+... x;

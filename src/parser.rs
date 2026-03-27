@@ -720,6 +720,8 @@ impl Parser {
             Some(Expr::UnaryPlus(Box::new(self.parse_index(source_map))))
         } else if self.accept_op(source_map, "-") {
             Some(Expr::Neg(Box::new(self.parse_index(source_map))))
+        } else if self.accept_op(source_map, "...") {
+            Some(Expr::Spread(Box::new(self.parse_index(source_map))))
         } else {
             None
         }

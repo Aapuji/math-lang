@@ -142,6 +142,7 @@ pub enum Expr {
     },
     UnaryPlus(Box<Expr>),
     Neg(Box<Expr>),
+    Spread(Box<Expr>),
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>

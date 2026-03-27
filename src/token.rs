@@ -128,7 +128,9 @@ impl Token {
             "=="  | "!=" | "<" | ">" | "<=" | ">=" | "∈" | "\\in" | "∉" | "\\notin" |
             "+"   | "-" | "+-" | "-+" |
             "*"   | "/" | "//" | "%" | "%%" |
-            "^"   => true,
+            "^"   |
+            ".."  | "..."  |
+            ":"   => true,
             _ => false
         }
     }
@@ -154,4 +156,4 @@ impl Token {
     }
 }
 
-pub const OPERATOR_CHARSET: &'static str = "=:+-*/^%<>!&|~$?@\\";
+pub const OPERATOR_CHARSET: &'static str = "=:+-*/^.%<>!&|~$?@\\";
