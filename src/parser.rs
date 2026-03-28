@@ -551,6 +551,10 @@ impl Parser {
             parse_comparison!(LessEq)
         } else if self.accept_op(source_map, ">=") {
             parse_comparison!(GreaterEq)
+        } else if self.accept(TokenKind::SlashIn) {
+            parse_comparison!(In)
+        } else if self.accept(TokenKind::SlashNotIn) {
+            Expr::Not(Box::new(parse_comparison!(In)))
         } else {
             lhs
         }

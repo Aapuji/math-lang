@@ -94,6 +94,10 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>
     },
+    In {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
     Plus {
         lhs: Box<Expr>,
         rhs: Box<Expr>
