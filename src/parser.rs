@@ -390,9 +390,12 @@ impl Parser {
         loop {
             if let Some(name) = self.require(TokenKind::Ident) {
                 if self.accept_op(source_map, ":") {
-                    todo!()
+                    // TODO: do parsing of valid rhs of sat
+                    let sat = self.parse_sat(source_map);
+
+                    args.push(Generic { name, sat: Some(sat) })
                 } else {
-                    args.push(Generic { name });
+                    args.push(Generic { name, sat: None });
                 }
 
                 // TODO: perform >> splitting
@@ -406,6 +409,11 @@ impl Parser {
         }
 
         args
+    }
+
+    // TODO: this
+    fn parse_sat(&mut self, source_map: &SourceMap) -> Token {
+        self.require(TokenKind::Ident).unwrap()
     }
 
     fn parse_type(&mut self, source_map: &SourceMap) -> Type {

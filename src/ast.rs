@@ -236,6 +236,7 @@ pub enum Type {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Generic {
     pub name: Token,
+    pub sat: Option<Token>      // TODO: figure out if we are going to be doing a sat system or impl or whatnot
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
