@@ -25,7 +25,7 @@ enum Food {
   Croissant
 }
 
-# I don't fully know how I will tell the compiler that this is a valid probability distribution
+@@distribution
 let FoodDist(food: Food) = match food {
   Food.Apple     => 0.5,
   Food.Banana    => 0.3,
