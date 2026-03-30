@@ -72,17 +72,21 @@ impl Parser {
             self.advance();
 
             let ty_args = if self.accept_op(source_map, "<") {
-                Some(self.parse_generic(source_map))
-            } else { None };
+                self.parse_generic(source_map)
+            } else { vec![] };
 
             let args = if let TokenKind::LParen = self.current_kind() {
                 Some(self.parse_args_def(source_map))
             } else { None };
+            let (args, kwargs) = match args {
+                None => (None, None),
+                Some((pos, kw)) => (Some(pos), Some(kw)) 
+            };
 
             let ty = self.parse_type_annotation(source_map);
 
             let mut is_def = false;
-            let def = if self.accept_op(source_map, "=") {
+            let def = if self.accept(TokenKind::Eq) {
                 Some(self.parse_expr(source_map))
             } else if self.accept_op(source_map, ":=") {
                 is_def = true;
@@ -101,7 +105,8 @@ impl Parser {
                         Expr::DefIn {
                             name: names[0],
                             ty_args,
-                            args, 
+                            args,
+                            kwargs,
                             ty, 
                             def: Box::new(def.unwrap()),
                             expr: Box::new(expr)
@@ -111,6 +116,7 @@ impl Parser {
                             name: names[0],
                             ty_args,
                             args,
+                            kwargs,
                             ty,
                             value: def.map(Box::new),
                             expr: Box::new(expr)
@@ -144,6 +150,7 @@ impl Parser {
                             name: names[0],
                             ty_args,
                             args,
+                            kwargs,
                             ty,
                             def: def.unwrap()
                         }
@@ -152,6 +159,7 @@ impl Parser {
                             name: names[0],
                             ty_args,
                             args,
+                            kwargs,
                             ty,
                             value: def
                         }
@@ -186,7 +194,7 @@ impl Parser {
 
             let ty = self.parse_type_annotation(source_map);
 
-            let def = if self.accept_op(source_map, "=") {
+            let def = if self.accept(TokenKind::Eq) {
                 Some(self.parse_expr(source_map))
             } else { None };
 
@@ -227,7 +235,7 @@ impl Parser {
 
             let ty = self.parse_type_annotation(source_map);
 
-            let def = if self.accept_op(source_map, "=") {
+            let def = if self.accept(TokenKind::Eq) {
                 Some(self.parse_expr(source_map))
             } else { None };
 
@@ -264,17 +272,20 @@ impl Parser {
 
         if let Some(name) = self.take(TokenKind::Ident) {
             let ty_args = if self.accept_op(source_map, "<") {
-                Some(self.parse_generic(source_map))
-            } else { None };
+                self.parse_generic(source_map)
+            } else { vec![] };
 
-            let args = self.parse_args_def(source_map);
+            let (args, kwargs) = self.parse_args_def(source_map);
 
             let ty = self.parse_type_annotation(source_map);
-
-            let value = if self.accept_op(source_map, "=") {
+            
+            let value = if self.accept(TokenKind::Eq) {
                 let expr = self.parse_expr(source_map);
 
-                self.expect(TokenKind::Semicolon);
+                if !in_expr {
+                    self.expect(TokenKind::Semicolon);
+                }
+
                 expr
             } else {
                 self.expect(TokenKind::LBrace);
@@ -292,6 +303,7 @@ impl Parser {
                     name,
                     ty_args,
                     args,
+                    kwargs,
                     ty,
                     value: Box::new(value),
                     expr: Box::new(expr)
@@ -299,11 +311,11 @@ impl Parser {
             } else if in_expr {
                 todo!("expected `in`")
             } else {
-                self.expect(TokenKind::Semicolon);
                 Stmt::Fn {
                     name,
                     ty_args,
                     args,
+                    kwargs,
                     ty,
                     value
                 }
@@ -313,28 +325,46 @@ impl Parser {
         }
     }
 
-    fn parse_args_def(&mut self, source_map: &SourceMap) -> Vec<(Token, Option<Type>)> {
+    fn parse_args_def(&mut self, source_map: &SourceMap) -> (Vec<(Token, Option<Type>)>, Vec<(Token, Option<Type>)>) {
         let mut args = vec![];
+        let mut kwargs = vec![];
+        let mut in_kwargs = false;
+        
         self.expect(TokenKind::LParen);
         
+        if self.accept(TokenKind::RParen) {
+            return (args, kwargs);
+        }
+
         loop {
             if let Some(arg) = self.take(TokenKind::Ident) {
                 let ty = self.parse_type_annotation(source_map);
-                args.push((arg, ty));
+                
+                if in_kwargs {
+                    kwargs.push((arg, ty));
+                } else {
+                    args.push((arg, ty));
+                }
 
-                if self.accept(TokenKind::RParen)
+                if !in_kwargs && matches!(self.current_kind(), TokenKind::Semicolon) {
+                    self.advance();
+                    in_kwargs = true;
+
+                    if self.accept(TokenKind::RParen) {
+                        todo!("expected keyword arguments after ';'")
+                    }
+                } else if let TokenKind::Semicolon = self.current_kind() {
+                    todo!("only on ';' allowed in argument definition")
+                } else if self.accept(TokenKind::RParen)
                     || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RParen)) {
                     break
                 }
-            } else if self.accept(TokenKind::RParen) {
-                break
             } else {
-                todo!("token: {:?}", self.current())
+                todo!("expected ident")
             }
         }
 
-        // self.expect(TokenKind::RParen);
-        args
+        (args, kwargs)
     }
 
     /// Attempts to parse a type annotation. Either it will be a regular type annotation, or an implicit refinement type annotation, or there may be no type annotation, in which it will output None.
@@ -828,24 +858,55 @@ impl Parser {
 
     fn finish_call(&mut self, source_map: &SourceMap, callee: Expr) -> Expr {
         let mut args = vec![];
+        let mut kwargs = vec![];
+        let mut in_kwargs = false;
 
-        while !self.accept(TokenKind::RParen) {
+        if self.accept(TokenKind::RParen) {
+            return Expr::Call {
+                callee: Box::new(callee),
+                args,
+                kwargs
+            };
+        }
+
+        loop {
             if args.len() >= Self::MAX_ARGS {
                 todo!("too many arguments")
             }
 
-            args.push(self.parse_expr(source_map));
+            // kwarg
+            if matches!(self.current_kind(), TokenKind::Ident) && matches!(self.peek_kind(), TokenKind::Eq) {
+                in_kwargs = true;
+                
+                let arg = *self.current();
+                
+                self.advance();
+                self.expect(TokenKind::Eq);
 
-            if self.accept(TokenKind::RParen) {
+                let value = if let TokenKind::Comma | TokenKind::RParen = self.current_kind() {
+                    Expr::Ident(arg)
+                } else {
+                    self.parse_expr(source_map)
+                };
+
+                kwargs.push((arg, value));
+            // args
+            } else if in_kwargs {
+                todo!("positional arguments cannot appear after keyword arguments")
+            } else {
+                args.push(self.parse_expr(source_map))
+            }
+
+            if self.accept(TokenKind::RParen)
+                || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RParen)) {
                 break
-            } else if !self.expect(TokenKind::Comma) {
-                self.error(*self.current());
             }
         }
 
         Expr::Call {
             callee: Box::new(callee),
-            args
+            args,
+            kwargs
         }
     }
 

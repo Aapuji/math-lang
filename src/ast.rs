@@ -4,8 +4,9 @@ use crate::token::Token;
 pub enum Stmt {
     Let {
         name: Token,
-        ty_args: Option<Vec<Generic>>,
+        ty_args: Vec<Generic>,
         args: Option<Vec<(Token, Option<Type>)>>,
+        kwargs: Option<Vec<(Token, Option<Type>)>>,
         ty: Option<Type>,
         value: Option<Expr>
     },
@@ -16,8 +17,9 @@ pub enum Stmt {
     },
     Def {
         name: Token,
-        ty_args: Option<Vec<Generic>>,
+        ty_args: Vec<Generic>,
         args: Option<Vec<(Token, Option<Type>)>>,
+        kwargs: Option<Vec<(Token, Option<Type>)>>,
         ty: Option<Type>,
         def: Expr
     },
@@ -38,8 +40,9 @@ pub enum Stmt {
     },
     Fn {
         name: Token,
-        ty_args: Option<Vec<Generic>>,
+        ty_args: Vec<Generic>,
         args: Vec<(Token, Option<Type>)>,
+        kwargs: Vec<(Token, Option<Type>)>,
         ty: Option<Type>,
         value: Expr
     },
@@ -152,14 +155,16 @@ pub enum Expr {
     Spread(Box<Expr>),
     Call {
         callee: Box<Expr>,
-        args: Vec<Expr>
+        args: Vec<Expr>,
+        kwargs: Vec<(Token, Expr)>
     },
     Unit,
     Tuple(Vec<Expr>),
     LetIn {
         name: Token,
-        ty_args: Option<Vec<Generic>>,
+        ty_args: Vec<Generic>,
         args: Option<Vec<(Token, Option<Type>)>>,
+        kwargs: Option<Vec<(Token, Option<Type>)>>,
         ty: Option<Type>,
         value: Option<Box<Expr>>,
         expr: Box<Expr>
@@ -172,8 +177,9 @@ pub enum Expr {
     },
     DefIn {
         name: Token,
-        ty_args: Option<Vec<Generic>>,
+        ty_args: Vec<Generic>,
         args: Option<Vec<(Token, Option<Type>)>>,
+        kwargs: Option<Vec<(Token, Option<Type>)>>,
         ty: Option<Type>,
         def: Box<Expr>,
         expr: Box<Expr>
@@ -198,8 +204,9 @@ pub enum Expr {
     },
     FnIn {
         name: Token,
-        ty_args: Option<Vec<Generic>>,
+        ty_args: Vec<Generic>,
         args: Vec<(Token, Option<Type>)>,
+        kwargs: Vec<(Token, Option<Type>)>,
         ty: Option<Type>,
         value: Box<Expr>,
         expr: Box<Expr>

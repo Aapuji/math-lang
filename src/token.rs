@@ -16,6 +16,7 @@ pub enum TokenKind {
 
     Operator, // any operator
     
+    Eq,
     At,
     DblAt,
     Backtick,
