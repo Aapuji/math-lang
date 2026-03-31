@@ -3,7 +3,7 @@ use std::vec::IntoIter;
 
 use rug::{Integer, Rational};
 
-use crate::ast::{Expr, Generic, Operation, Stmt, StringPart, Type};
+use crate::ast::{Expr, Generic, Operation, Stmt, StringPart, Type, Variant};
 use crate::source::{SourceMap};
 use crate::token::{Token, TokenKind};
 
@@ -54,12 +54,27 @@ impl Parser {
         }
     }
 
+    fn starts_non_expr_stmt(&self) -> bool {
+        matches!(self.current_kind(), 
+              TokenKind::Let
+            | TokenKind::Var
+            | TokenKind::Const
+            | TokenKind::Fn
+            | TokenKind::Enum
+            | TokenKind::Struct
+            | TokenKind::Sym
+            | TokenKind::Alias
+            | TokenKind::Using
+        )
+    }
+
     fn parse_non_expr_stmt(&mut self, source_map: &SourceMap) -> Stmt {
         match self.current_kind() {
             TokenKind::Let => self.parse_let(source_map, false),
             TokenKind::Var => self.parse_var(source_map, false),
             TokenKind::Const => self.parse_const(source_map, false),
             TokenKind::Fn => self.parse_fn(source_map, false),
+            TokenKind::Enum => self.parse_enum(source_map), // TODO: determine if we should have `in` for enum & struct
             _ => todo!()
         }
     }
@@ -380,6 +395,83 @@ impl Parser {
         }
     }
 
+    fn parse_enum(&mut self, source_map: &SourceMap) -> Stmt {
+        self.accept(TokenKind::Enum);
+
+        let Some(name) = self.require(TokenKind::Ident)
+        else { todo!("expected ident") };
+
+        let ty_args = if self.accept_op(source_map, "<") {
+            self.parse_generic(source_map)
+        } else { vec![] };
+
+        self.expect(TokenKind::LBrace);
+        if self.accept(TokenKind::RBrace) {
+            return Stmt::Enum {
+                name,
+                ty_args,
+                variants: vec![]
+            };
+        }
+
+        let mut variants = vec![];
+        loop {
+            let Some(name) = self.require(TokenKind::Ident)
+            else { todo!("expected ident") };
+
+            println!("HERE NOW: {:?}, name is {:?}", self.current(), name.get_lexeme(source_map));
+
+            if self.accept(TokenKind::LParen) {
+                if self.accept(TokenKind::RParen) {
+                    todo!("empty enum tuple variants are not allowed")
+                }
+
+                let mut data = vec![];
+                loop {
+                    data.push(self.parse_type(source_map));
+
+                    if self.accept(TokenKind::RParen)
+                        || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RBrace)) {
+                        break
+                    }
+                }
+
+                variants.push(Variant::Tuple(data));
+            } else if self.accept(TokenKind::LBrace) {
+                if self.accept(TokenKind::RBrace) {
+                    todo!("empty enum record variants are not allowed")
+                }
+
+                let mut entries = vec![];
+                loop {
+                    let Some(key) = self.require(TokenKind::Ident)
+                    else { todo!("expected ident") };
+
+                    self.expect_op(source_map, ":");
+                    let ty = self.parse_type(source_map);
+
+                    entries.push((key, ty));
+
+                    if self.accept(TokenKind::RBrace)
+                        || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RBrace)) {
+                        break
+                    }
+                }
+
+                variants.push(Variant::Record(entries));
+            } else {
+                variants.push(Variant::Const(name));
+            }
+            
+            if self.accept(TokenKind::RBrace) 
+                || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RBrace)) {
+                break
+            }
+        }
+
+        Stmt::Enum { name, ty_args, variants }
+    }
+
     fn parse_generic(&mut self, source_map: &SourceMap) -> Vec<Generic> {
         let mut args = vec![];
 
@@ -431,18 +523,6 @@ impl Parser {
 
             _ => todo!()
         }
-    }
-    
-    fn starts_non_expr_stmt(&self) -> bool {
-        matches!(self.current_kind(), 
-              TokenKind::Let
-            | TokenKind::Var
-            | TokenKind::Const
-            | TokenKind::Fn
-            | TokenKind::Sym
-            | TokenKind::Alias
-            | TokenKind::Using
-        )
     }
 
     fn parse_expr_stmt(&mut self, source_map: &SourceMap) -> Stmt {
@@ -1229,6 +1309,8 @@ impl Parser {
             
             Some(token)
         } else {
+            println!("expected {kind:?} found {:?}", self.current_kind());
+            self.error(*self.current());
             None
         }
     }
@@ -1250,6 +1332,7 @@ impl Parser {
         if self.accept(kind) {
             true
         } else {
+            println!("expected {kind:?} found {:?}", self.current_kind());
             self.error(*self.current());
             false
         }
@@ -1260,6 +1343,7 @@ impl Parser {
         if self.accept_op(source_map, op) {
             true
         } else {
+            println!("expected {op:?} found {:?}", self.current().get_lexeme(source_map));
             self.error(*self.current());
             false
         }
@@ -1269,7 +1353,8 @@ impl Parser {
         if let Some(token) = self.take(kind) {
             Some(token)
         } else {
-            self.error(*self.current());
+            // println!("expected {kind:?} found {:?}", self.current_kind());
+            // self.error(*self.current());
             None
         }
     }

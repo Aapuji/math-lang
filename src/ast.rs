@@ -46,6 +46,11 @@ pub enum Stmt {
         ty: Option<Type>,
         value: Expr
     },
+    Enum {
+        name: Token,
+        ty_args: Vec<Generic>,
+        variants: Vec<Variant>
+    },
     Expr(Expr),
 }
 
@@ -237,6 +242,13 @@ pub enum Type {
 pub struct Generic {
     pub name: Token,
     pub sat: Option<Token>      // TODO: figure out if we are going to be doing a sat system or impl or whatnot
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Variant {
+    Const(Token),
+    Tuple(Vec<Type>),
+    Record(Vec<(Token, Type)>)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,3 +1,8 @@
-fn print<S: ToString>(msg: S; end: String, sep: String): Void {
-    __internal_print(msg, end=, sep=)
+enum SuperOption<T> {
+    Many {
+        left: T,
+        right: T
+    },
+    Some(T),
+    None
 }
