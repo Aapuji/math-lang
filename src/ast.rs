@@ -51,6 +51,11 @@ pub enum Stmt {
         ty_args: Vec<Generic>,
         variants: Vec<Variant>
     },
+    Struct {
+        name: Token,
+        ty_args: Vec<Generic>,
+        fields: Vec<(Token, Type)>
+    },
     Expr(Expr),
 }
 

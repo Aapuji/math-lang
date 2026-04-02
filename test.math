@@ -1,8 +1,5 @@
-enum SuperOption<T> {
-    Many {
-        left: T,
-        right: T
-    },
-    Some(T),
-    None
+struct Data<T> {
+    name: String,
+    lifetime: Nat,
+    data: T
 }

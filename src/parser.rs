@@ -75,6 +75,7 @@ impl Parser {
             TokenKind::Const => self.parse_const(source_map, false),
             TokenKind::Fn => self.parse_fn(source_map, false),
             TokenKind::Enum => self.parse_enum(source_map), // TODO: determine if we should have `in` for enum & struct
+            TokenKind::Struct => self.parse_struct(source_map),
             _ => todo!()
         }
     }
@@ -470,6 +471,41 @@ impl Parser {
         }
 
         Stmt::Enum { name, ty_args, variants }
+    }
+
+    fn parse_struct(&mut self, source_map: &SourceMap) -> Stmt {
+        self.accept(TokenKind::Struct);
+
+        let Some(name) = self.require(TokenKind::Ident)
+        else { todo!("expected ident") };
+
+        let ty_args = if self.accept_op(source_map, "<") {
+            self.parse_generic(source_map)
+        } else { vec![] };
+
+        self.expect(TokenKind::LBrace);
+
+        if self.accept(TokenKind::RBrace) {
+            return Stmt::Struct { name, ty_args, fields: vec![] };
+        }
+
+        let mut fields = vec![];
+        loop {
+            let Some(field) = self.require(TokenKind::Ident)
+            else { todo!("expected ident") };
+
+            self.expect_op(source_map, ":");
+            let ty = self.parse_type(source_map);
+
+            fields.push((field, ty));
+
+            if self.accept(TokenKind::RBrace)
+                || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RBrace)) {
+                break
+            } 
+        }
+
+        Stmt::Struct { name, ty_args, fields }
     }
 
     fn parse_generic(&mut self, source_map: &SourceMap) -> Vec<Generic> {
