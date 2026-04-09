@@ -136,6 +136,17 @@ impl Token {
         }
     }
 
+    pub fn is_terminating(&self, source_map: &SourceMap) -> bool {
+        match self.get_lexeme(source_map) {
+            ")" |
+            "]" |
+            "}" |
+            "," |
+            ";" => true,
+            _ => false
+        }
+    }
+
     pub fn kind(&self) -> TokenKind {
         self.kind
     }
@@ -153,7 +164,7 @@ impl Token {
     }
 
     pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str {
-        &source_map.get_source(self.span.source_id()).data()[self.span.range()]
+        self.span.get_lexeme(source_map)
     }
 }
 

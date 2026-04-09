@@ -1,5 +1,1 @@
-struct Data<T> {
-    name: String,
-    lifetime: Nat,
-    data: T
-}
+let x = y + 1;

@@ -45,6 +45,11 @@ impl Span {
     pub fn set_source_id(&mut self, source_id: SourceId) {
         self.source_id = source_id;
     }
+
+    pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str{ 
+        &source_map.get_source(self.source_id()).data()[self.range()]
+    }
+
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

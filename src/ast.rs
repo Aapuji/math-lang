@@ -1,67 +1,68 @@
-use crate::token::Token;
+use crate::{source::{SourceMap, Span}, token::{Token, TokenKind}};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
+    // TODO: Split let var and let fn
     Let {
-        name: Token,
+        name: Var,
         ty_args: Vec<Generic>,
-        args: Option<Vec<(Token, Option<Type>)>>,
-        kwargs: Option<Vec<(Token, Option<Type>)>>,
+        args: Option<Vec<(Var, Option<Type>)>>,
+        kwargs: Option<Vec<(Var, Option<Type>)>>,
         ty: Option<Type>,
         value: Option<Expr>
     },
     LetMany {
-        names: Vec<Token>,
+        names: Vec<Var>,
         ty: Option<Type>,
         value: Option<Expr>
     },
     Def {
-        name: Token,
+        name: Var,
         ty_args: Vec<Generic>,
-        args: Option<Vec<(Token, Option<Type>)>>,
-        kwargs: Option<Vec<(Token, Option<Type>)>>,
+        args: Option<Vec<(Var, Option<Type>)>>,
+        kwargs: Option<Vec<(Var, Option<Type>)>>,
         ty: Option<Type>,
         def: Expr
     },
     DefMany {
-        names: Vec<Token>,
+        names: Vec<Var>,
         ty: Option<Type>,
         def: Expr
     },
     Var {
-        name: Token,
+        name: Var,
         ty: Option<Type>,
         value: Option<Expr>
     },
     Const {
-        name: Token,
+        name: Var,
         ty: Option<Type>,
         value: Option<Expr>
     },
     Fn {
-        name: Token,
+        name: Var,
         ty_args: Vec<Generic>,
-        args: Vec<(Token, Option<Type>)>,
-        kwargs: Vec<(Token, Option<Type>)>,
+        args: Vec<(Var, Option<Type>)>,
+        kwargs: Vec<(Var, Option<Type>)>,
         ty: Option<Type>,
         value: Expr
     },
     Enum {
-        name: Token,
+        name: Var,
         ty_args: Vec<Generic>,
         variants: Vec<Variant>
     },
     Struct {
-        name: Token,
+        name: Var,
         ty_args: Vec<Generic>,
-        fields: Vec<(Token, Type)>
+        fields: Vec<(Var, Type)>
     },
     Expr(Expr),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
-    Ident(Token),
+    Ident(Var),
     String(Vec<StringPart>),
     Int(rug::Integer),
     Real(rug::Rational),
@@ -151,6 +152,11 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>
     },
+    Range {
+        left: Endpoint,
+        right: Endpoint,
+        step: RangeStep
+    },
     Prefix {
         operator: Operation,
         operand: Box<Expr>
@@ -166,57 +172,57 @@ pub enum Expr {
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,
-        kwargs: Vec<(Token, Expr)>
+        kwargs: Vec<(Var, Expr)>
     },
     Unit,
     Tuple(Vec<Expr>),
     LetIn {
-        name: Token,
+        name: Var,
         ty_args: Vec<Generic>,
-        args: Option<Vec<(Token, Option<Type>)>>,
-        kwargs: Option<Vec<(Token, Option<Type>)>>,
+        args: Option<Vec<(Var, Option<Type>)>>,
+        kwargs: Option<Vec<(Var, Option<Type>)>>,
         ty: Option<Type>,
         value: Option<Box<Expr>>,
         expr: Box<Expr>
     },
     LetManyIn {
-        names: Vec<Token>,
+        names: Vec<Var>,
         ty: Option<Type>,
         value: Option<Box<Expr>>,
         expr: Box<Expr>
     },
     DefIn {
-        name: Token,
+        name: Var,
         ty_args: Vec<Generic>,
-        args: Option<Vec<(Token, Option<Type>)>>,
-        kwargs: Option<Vec<(Token, Option<Type>)>>,
+        args: Option<Vec<(Var, Option<Type>)>>,
+        kwargs: Option<Vec<(Var, Option<Type>)>>,
         ty: Option<Type>,
         def: Box<Expr>,
         expr: Box<Expr>
     },
     DefManyIn {
-        names: Vec<Token>,
+        names: Vec<Var>,
         ty: Option<Type>,
         def: Box<Expr>,
         expr: Box<Expr>
     },
     VarIn {
-        name: Token,
+        name: Var,
         ty: Option<Type>,
         value: Option<Box<Expr>>,
         expr: Box<Expr>
     },
     ConstIn {
-        name: Token,
+        name: Var,
         ty: Option<Type>,
         value: Option<Box<Expr>>,
         expr: Box<Expr>
     },
     FnIn {
-        name: Token,
+        name: Var,
         ty_args: Vec<Generic>,
-        args: Vec<(Token, Option<Type>)>,
-        kwargs: Vec<(Token, Option<Type>)>,
+        args: Vec<(Var, Option<Type>)>,
+        kwargs: Vec<(Var, Option<Type>)>,
         ty: Option<Type>,
         value: Box<Expr>,
         expr: Box<Expr>
@@ -237,33 +243,109 @@ impl Expr {
     }
 }
 
+// TODO: symbol id
+type SymbolId = usize;
+
+/// Represents a name. `SymbolId` is assigned to 0 until name resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Var {
+    id: SymbolId,
+    span: Span
+}
+
+impl Var {
+    pub fn new(span: Span) -> Self {
+        Self {
+            id: 0,
+            span
+        }
+    }
+
+    pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str {
+        self.span.get_lexeme(source_map)
+    }
+}
+
+impl TryFrom<Token> for Var {
+    type Error = ();
+
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        match value.kind() {
+            TokenKind::Ident => Ok(Var::new(value.span())),
+            _ => Err(())
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
-    Named(Token),
+    Named(Var),
     // more
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Generic {
-    pub name: Token,
-    pub sat: Option<Token>      // TODO: figure out if we are going to be doing a sat system or impl or whatnot
+    pub name: Var,
+    // pub sat: Option<Var>      // TODO: figure out if we are going to be doing a sat system or impl or whatnot
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Variant {
-    Const(Token),
+    Const(Var),
     Tuple(Vec<Type>),
-    Record(Vec<(Token, Type)>)
+    Record(Vec<(Var, Type)>)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Endpoint {
+    Inclusive(Box<Expr>),
+    Exclusive(Box<Expr>),
+    Unspecified
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RangeStep {
+    Discrete(Box<Expr>),
+    Continuous
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Alias {
+    new: Var,
+    old: AliasSrc,
+    kind: AliasKind
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AliasSrc {
+    Ident(Var),
+    Operator(Operation),
+    Expr(Expr)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AliasKind {
+    Ident,
+    Operator
+}
+
+// TODO: this
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Macro {
+    name: Var,
+    arity: u8,
+
+    // block: Expr
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
-    Ident(Token),
+    Ident(Var),
     Custom(Token),
     OpLit(Token),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StringPart {
     Text(String),        // converts escape sequences
     Expr(Expr)

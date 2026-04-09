@@ -3,7 +3,7 @@ use std::vec::IntoIter;
 
 use rug::{Integer, Rational};
 
-use crate::ast::{Expr, Generic, Operation, Stmt, StringPart, Type, Variant};
+use crate::ast::{Alias, Endpoint, Expr, Generic, Macro, Operation, RangeStep, Stmt, StringPart, Type, Var, Variant};
 use crate::source::{SourceMap};
 use crate::token::{Token, TokenKind};
 
@@ -34,6 +34,7 @@ impl Parser {
 
     pub fn parse(mut self, source_map: &mut SourceMap) -> Vec<Stmt> {
         let mut stmts = vec![];
+        // let top_env = ExpEnv::new();
 
         while !self.at_end() {
             if self.accept(TokenKind::Semicolon) {
@@ -84,7 +85,7 @@ impl Parser {
         self.accept(TokenKind::Let);
 
         if let TokenKind::Ident = self.current_kind() {
-            let names = vec![*self.current()];
+            let names = vec![Var::try_from(self.current()).unwrap()];
             self.advance();
 
             let ty_args = if self.accept_op(source_map, "<") {
@@ -119,7 +120,7 @@ impl Parser {
                 if names.len() == 1 {
                     Stmt::Expr(if is_def {
                         Expr::DefIn {
-                            name: names[0],
+                            name: names[0].try_into().unwrap(),
                             ty_args,
                             args,
                             kwargs,
@@ -205,7 +206,7 @@ impl Parser {
         self.accept(TokenKind::Var);
         
         if let TokenKind::Ident = self.current_kind() {
-            let name = *self.current();
+            let name = self.current().try_into().unwrap();
             self.advance();
 
             let ty = self.parse_type_annotation(source_map);
@@ -246,7 +247,7 @@ impl Parser {
         self.accept(TokenKind::Const);
         
         if let TokenKind::Ident = self.current_kind() {
-            let name = *self.current();
+            let name = self.current().try_into().unwrap();
             self.advance();
 
             let ty = self.parse_type_annotation(source_map);
@@ -287,6 +288,8 @@ impl Parser {
         self.accept(TokenKind::Fn);
 
         if let Some(name) = self.take(TokenKind::Ident) {
+            let name = name.try_into().unwrap();
+
             let ty_args = if self.accept_op(source_map, "<") {
                 self.parse_generic(source_map)
             } else { vec![] };
@@ -341,7 +344,7 @@ impl Parser {
         }
     }
 
-    fn parse_args_def(&mut self, source_map: &SourceMap) -> (Vec<(Token, Option<Type>)>, Vec<(Token, Option<Type>)>) {
+    fn parse_args_def(&mut self, source_map: &SourceMap) -> (Vec<(Var, Option<Type>)>, Vec<(Var, Option<Type>)>) {
         let mut args = vec![];
         let mut kwargs = vec![];
         let mut in_kwargs = false;
@@ -354,6 +357,7 @@ impl Parser {
 
         loop {
             if let Some(arg) = self.take(TokenKind::Ident) {
+                let arg = arg.try_into().unwrap();
                 let ty = self.parse_type_annotation(source_map);
                 
                 if in_kwargs {
@@ -401,6 +405,7 @@ impl Parser {
 
         let Some(name) = self.require(TokenKind::Ident)
         else { todo!("expected ident") };
+        let name = name.try_into().unwrap();
 
         let ty_args = if self.accept_op(source_map, "<") {
             self.parse_generic(source_map)
@@ -419,6 +424,7 @@ impl Parser {
         loop {
             let Some(name) = self.require(TokenKind::Ident)
             else { todo!("expected ident") };
+            let name: Var = name.try_into().unwrap();
 
             println!("HERE NOW: {:?}, name is {:?}", self.current(), name.get_lexeme(source_map));
 
@@ -447,6 +453,7 @@ impl Parser {
                 loop {
                     let Some(key) = self.require(TokenKind::Ident)
                     else { todo!("expected ident") };
+                    let key = key.try_into().unwrap();
 
                     self.expect_op(source_map, ":");
                     let ty = self.parse_type(source_map);
@@ -478,6 +485,7 @@ impl Parser {
 
         let Some(name) = self.require(TokenKind::Ident)
         else { todo!("expected ident") };
+        let name = name.try_into().unwrap();
 
         let ty_args = if self.accept_op(source_map, "<") {
             self.parse_generic(source_map)
@@ -493,6 +501,7 @@ impl Parser {
         loop {
             let Some(field) = self.require(TokenKind::Ident)
             else { todo!("expected ident") };
+            let field = field.try_into().unwrap();
 
             self.expect_op(source_map, ":");
             let ty = self.parse_type(source_map);
@@ -517,13 +526,15 @@ impl Parser {
 
         loop {
             if let Some(name) = self.require(TokenKind::Ident) {
+                let name = Var::try_from(name).unwrap();
+
                 if self.accept_op(source_map, ":") {
                     // TODO: do parsing of valid rhs of sat
-                    let sat = self.parse_sat(source_map);
+                    // let sat = self.parse_sat(source_map);
 
-                    args.push(Generic { name, sat: Some(sat) })
+                    args.push(Generic { name })
                 } else {
-                    args.push(Generic { name, sat: None });
+                    args.push(Generic { name });
                 }
 
                 // TODO: perform >> splitting
@@ -540,9 +551,9 @@ impl Parser {
     }
 
     // TODO: this
-    fn parse_sat(&mut self, source_map: &SourceMap) -> Token {
-        self.require(TokenKind::Ident).unwrap()
-    }
+    // fn parse_sat(&mut self, source_map: &SourceMap) -> Token {
+    //     self.require(TokenKind::Ident).unwrap()
+    // }
 
     fn parse_type(&mut self, source_map: &SourceMap) -> Type {
         self.parse_primary_type(source_map)
@@ -551,7 +562,7 @@ impl Parser {
     fn parse_primary_type(&mut self, source_map: &SourceMap) -> Type {
         match self.current_kind() {
             TokenKind::Ident => {
-                let ty = Type::Named(*self.current());
+                let ty = Type::Named(self.current().try_into().unwrap());
                 self.advance();
                 
                 ty
@@ -714,6 +725,8 @@ impl Parser {
         }
     }
 
+    // TODO: ranges
+
     fn parse_additive(&mut self, source_map: &SourceMap) -> Expr {
         let lhs = self.parse_multiplicative(source_map);
 
@@ -823,7 +836,7 @@ impl Parser {
 
                     Expr::Infix {
                         lhs: Box::new($lhs),
-                        operator: Operation::Ident(operator),
+                        operator: Operation::Ident(operator.try_into().unwrap()),
                         rhs: Box::new(rhs)
                     }
                 } else if self.accept(TokenKind::Backtick) {
@@ -901,7 +914,7 @@ impl Parser {
                 self.advance();
 
                 Expr::Prefix {
-                    operator: Operation::Ident(operator),
+                    operator: Operation::Ident(operator.try_into().unwrap()),
                     operand: Box::new(if let Some(unary) = self.parse_builtin_unary(source_map) {
                         unary
                     } else {
@@ -1002,7 +1015,7 @@ impl Parser {
             if matches!(self.current_kind(), TokenKind::Ident) && matches!(self.peek_kind(), TokenKind::Eq) {
                 in_kwargs = true;
                 
-                let arg = *self.current();
+                let arg = self.current().try_into().unwrap();
                 
                 self.advance();
                 self.expect(TokenKind::Eq);
@@ -1173,7 +1186,7 @@ impl Parser {
             }
 
             TokenKind::Ident => {
-                let ident = Expr::Ident(*self.current());
+                let ident = Expr::Ident(self.current().try_into().unwrap());
                 self.advance();
 
                 ident
@@ -1340,13 +1353,13 @@ impl Parser {
     /// Checks if the current token matches the given `TokenKind`. If so, it advances to the next token and outputs the passed `Token`. If not, it outputs `None`.
     fn take(&mut self, kind: TokenKind) -> Option<Token> {
         if kind == self.current_kind() {
-            let token = *self.current();
+            let token = self.current();
             self.advance();
             
             Some(token)
         } else {
             println!("expected {kind:?} found {:?}", self.current_kind());
-            self.error(*self.current());
+            self.error(self.current());
             None
         }
     }
@@ -1354,7 +1367,7 @@ impl Parser {
     /// Checks if the current token matches the given `TokenKind`. If so, it advances to the next token and outputs the passed `Token`. If not, it outputs `None`.
     fn take_op(&mut self, source_map: &SourceMap, op: &str) -> Option<Token> {        
         if self.current_op(source_map)? == op {
-            let token = *self.current();
+            let token = self.current();
             self.advance();
             
             Some(token)
@@ -1369,7 +1382,7 @@ impl Parser {
             true
         } else {
             println!("expected {kind:?} found {:?}", self.current_kind());
-            self.error(*self.current());
+            self.error(self.current());
             false
         }
     }
@@ -1380,7 +1393,7 @@ impl Parser {
             true
         } else {
             println!("expected {op:?} found {:?}", self.current().get_lexeme(source_map));
-            self.error(*self.current());
+            self.error(self.current());
             false
         }
     }
@@ -1399,7 +1412,7 @@ impl Parser {
         if let Some(token) = self.take_op(source_map, op) {
             Some(token)
         } else {
-            self.error(*self.current());
+            self.error(self.current());
             None
         }
     }
@@ -1429,8 +1442,8 @@ impl Parser {
         self.peek().kind()
     }
 
-    fn current(&self) -> &Token {
-        &self.current_token
+    fn current(&self) -> Token {
+        self.current_token
     }
 
     fn current_kind(&self) -> TokenKind {
@@ -1447,6 +1460,15 @@ impl Parser {
             None
         }
     }
+}
+
+/// A struct to store the macro and alias definitions for each scope. This is only used until aliases and macros have been expanded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExpEnv {
+    aliases: Vec<Alias>,
+    macros: Vec<Macro>,
+    parent: Option<Box<ExpEnv>>,
+    children: Vec<ExpEnv>
 }
 
 // TODO: Change Recursive Descent Parser into Pratt Parser for expressions
@@ -1477,6 +1499,7 @@ HIGHEST
 //     And,
 //     Not,
 //     Comparison, // note that it is parsed differently due to comparison chaining
+//     Range,
 //     Additive,
 //     Multiplicative,
 //     Exponentative,
