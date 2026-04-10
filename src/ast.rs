@@ -1,34 +1,10 @@
 use crate::{source::{SourceMap, Span}, token::{Token, TokenKind}};
 
+// TODO: store spans
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
-    // TODO: Split let var and let fn
-    Let {
-        name: Var,
-        ty_args: Vec<Generic>,
-        args: Option<Vec<(Var, Option<Type>)>>,
-        kwargs: Option<Vec<(Var, Option<Type>)>>,
-        ty: Option<Type>,
-        value: Option<Expr>
-    },
-    LetMany {
-        names: Vec<Var>,
-        ty: Option<Type>,
-        value: Option<Expr>
-    },
-    Def {
-        name: Var,
-        ty_args: Vec<Generic>,
-        args: Option<Vec<(Var, Option<Type>)>>,
-        kwargs: Option<Vec<(Var, Option<Type>)>>,
-        ty: Option<Type>,
-        def: Expr
-    },
-    DefMany {
-        names: Vec<Var>,
-        ty: Option<Type>,
-        def: Expr
-    },
+    Let(Let),
     Var {
         name: Var,
         ty: Option<Type>,
@@ -40,11 +16,7 @@ pub enum Stmt {
         value: Option<Expr>
     },
     Fn {
-        name: Var,
-        ty_args: Vec<Generic>,
-        args: Vec<(Var, Option<Type>)>,
-        kwargs: Vec<(Var, Option<Type>)>,
-        ty: Option<Type>,
+        header: FnHeader,
         value: Expr
     },
     Enum {
@@ -176,36 +148,7 @@ pub enum Expr {
     },
     Unit,
     Tuple(Vec<Expr>),
-    LetIn {
-        name: Var,
-        ty_args: Vec<Generic>,
-        args: Option<Vec<(Var, Option<Type>)>>,
-        kwargs: Option<Vec<(Var, Option<Type>)>>,
-        ty: Option<Type>,
-        value: Option<Box<Expr>>,
-        expr: Box<Expr>
-    },
-    LetManyIn {
-        names: Vec<Var>,
-        ty: Option<Type>,
-        value: Option<Box<Expr>>,
-        expr: Box<Expr>
-    },
-    DefIn {
-        name: Var,
-        ty_args: Vec<Generic>,
-        args: Option<Vec<(Var, Option<Type>)>>,
-        kwargs: Option<Vec<(Var, Option<Type>)>>,
-        ty: Option<Type>,
-        def: Box<Expr>,
-        expr: Box<Expr>
-    },
-    DefManyIn {
-        names: Vec<Var>,
-        ty: Option<Type>,
-        def: Box<Expr>,
-        expr: Box<Expr>
-    },
+    LetIn(Box<Let>, Box<Expr>),
     VarIn {
         name: Var,
         ty: Option<Type>,
@@ -219,11 +162,7 @@ pub enum Expr {
         expr: Box<Expr>
     },
     FnIn {
-        name: Var,
-        ty_args: Vec<Generic>,
-        args: Vec<(Var, Option<Type>)>,
-        kwargs: Vec<(Var, Option<Type>)>,
-        ty: Option<Type>,
+        header: FnHeader,
         value: Box<Expr>,
         expr: Box<Expr>
     }
@@ -274,6 +213,47 @@ impl TryFrom<Token> for Var {
             TokenKind::Ident => Ok(Var::new(value.span())),
             _ => Err(())
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Let {
+    bindings: Vec<Binding>,
+    kind: LetKind,
+    value: Option<Expr>,
+}
+
+impl Let {
+    pub fn new(bindings: Vec<Binding>, kind: LetKind, value: Option<Expr>) -> Self {
+        Self { bindings, kind, value }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LetKind {
+    Assign,
+    Define,
+    Declare
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Binding {
+    Name(Var, Option<Type>),
+    Call(FnHeader),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FnHeader {
+    name: Var,
+    ty_args: Vec<Generic>,
+    args: Vec<(Var, Option<Type>)>,
+    kwargs: Vec<(Var, Option<Type>)>,
+    ty: Option<Type>
+}
+
+impl FnHeader {
+    pub fn new(name: Var, ty_args: Vec<Generic>, args: Vec<(Var, Option<Type>)>, kwargs: Vec<(Var, Option<Type>)>, ty: Option<Type>) -> Self {
+        Self { name, ty_args, args, kwargs, ty }
     }
 }
 

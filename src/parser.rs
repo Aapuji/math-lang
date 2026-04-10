@@ -3,8 +3,8 @@ use std::vec::IntoIter;
 
 use rug::{Integer, Rational};
 
-use crate::ast::{Alias, Endpoint, Expr, Generic, Macro, Operation, RangeStep, Stmt, StringPart, Type, Var, Variant};
-use crate::source::{SourceMap};
+use crate::ast::*;
+use crate::source::SourceMap;
 use crate::token::{Token, TokenKind};
 
 type TokenStream = Peekable<Chain<IntoIter<Token>, Repeat<Token>>>;
@@ -84,121 +84,67 @@ impl Parser {
     fn parse_let(&mut self, source_map: &SourceMap, in_expr: bool) -> Stmt {
         self.accept(TokenKind::Let);
 
-        if let TokenKind::Ident = self.current_kind() {
-            let names = vec![Var::try_from(self.current()).unwrap()];
-            self.advance();
+        let bindings = self.parse_bindings(source_map);
+        let (kind, value) = if self.accept(TokenKind::Eq) {
+            (LetKind::Assign, Some(self.parse_expr(source_map)))
+        // TODO: Change := to be a regular tokenkind rather than just a special kind of operator
+        } else if self.accept_op(source_map, ":=") {
+            (LetKind::Define, Some(self.parse_expr(source_map)))
+        } else {
+            (LetKind::Declare, None)
+        };
 
-            let ty_args = if self.accept_op(source_map, "<") {
-                self.parse_generic(source_map)
-            } else { vec![] };
+        if self.accept(TokenKind::In) {
+            let expr = self.parse_expr(source_map);
 
-            let args = if let TokenKind::LParen = self.current_kind() {
-                Some(self.parse_args_def(source_map))
-            } else { None };
-            let (args, kwargs) = match args {
-                None => (None, None),
-                Some((pos, kw)) => (Some(pos), Some(kw)) 
-            };
+            if !in_expr {
+                self.expect(TokenKind::Semicolon);
+            }
 
+            Stmt::Expr(Expr::LetIn(Box::new(Let::new(bindings, kind, value)), Box::new(expr)))
+        } else if in_expr {
+            todo!("expected 'in'")
+        } else {
+            self.expect(TokenKind::Semicolon);
+
+            Stmt::Let(Let::new(bindings, kind, value))
+        }
+    }
+
+    fn parse_bindings(&mut self, source_map: &SourceMap) -> Vec<Binding> {
+        let mut bindings = vec![];
+
+        loop {
+            bindings.push(self.parse_binding(source_map));
+
+            println!("HERE IN BDINING: {:?}", self.current());
+
+            if self.accept(TokenKind::Comma) {
+                continue
+            } else {
+                break
+            }
+        }
+
+        bindings
+    }
+
+    fn parse_binding(&mut self, source_map: &SourceMap) -> Binding {
+        let Some(name) = self.require(TokenKind::Ident)
+        else { todo!("expected ident") };
+        let name = name.try_into().unwrap();
+
+        if let TokenKind::LParen = self.current_kind() {
+            // let ty_args = self.parse_generic(source_map);
+            let ty_args = vec![]; // todo this
+            let (args, kwargs) = self.parse_args_def(source_map);
             let ty = self.parse_type_annotation(source_map);
 
-            let mut is_def = false;
-            let def = if self.accept(TokenKind::Eq) {
-                Some(self.parse_expr(source_map))
-            } else if self.accept_op(source_map, ":=") {
-                is_def = true;
-                Some(self.parse_expr(source_map))
-            } else { None };
-
-            if self.accept(TokenKind::In) {
-                let expr = self.parse_expr(source_map);
-                
-                if !in_expr {
-                    self.expect(TokenKind::Semicolon);
-                }
-
-                if names.len() == 1 {
-                    Stmt::Expr(if is_def {
-                        Expr::DefIn {
-                            name: names[0].try_into().unwrap(),
-                            ty_args,
-                            args,
-                            kwargs,
-                            ty, 
-                            def: Box::new(def.unwrap()),
-                            expr: Box::new(expr)
-                        }
-                    } else {
-                        Expr::LetIn {
-                            name: names[0],
-                            ty_args,
-                            args,
-                            kwargs,
-                            ty,
-                            value: def.map(Box::new),
-                            expr: Box::new(expr)
-                        }
-                    })
-                } else {
-                    Stmt::Expr(if is_def {
-                        Expr::DefManyIn {
-                            names,
-                            ty,
-                            def: Box::new(def.unwrap()),
-                            expr: Box::new(expr)
-                        }
-                    } else {
-                        Expr::LetManyIn {
-                            names,
-                            ty,
-                            value: def.map(Box::new),
-                            expr: Box::new(expr)
-                        }
-                    })
-                }
-            } else if in_expr {
-                todo!("expected `in`")
-            } else {
-                self.expect(TokenKind::Semicolon);
-
-                if names.len() == 1 {
-                    if is_def {
-                        Stmt::Def {
-                            name: names[0],
-                            ty_args,
-                            args,
-                            kwargs,
-                            ty,
-                            def: def.unwrap()
-                        }
-                    } else {
-                        Stmt::Let {
-                            name: names[0],
-                            ty_args,
-                            args,
-                            kwargs,
-                            ty,
-                            value: def
-                        }
-                    }
-                } else {
-                    if is_def {
-                        Stmt::DefMany {
-                            names,
-                            ty,
-                            def: def.unwrap()
-                        }
-                    } else {
-                        Stmt::LetMany {
-                            names,
-                            ty,
-                            value: def
-                        }
-                    }
-                }
-            }
+            Binding::Call(FnHeader::new(name, ty_args, args, kwargs, ty))
         } else {
-            todo!()
+            let ty = self.parse_type_annotation(source_map);
+            
+            Binding::Name(name, ty)
         }
     }
 
@@ -290,14 +236,9 @@ impl Parser {
         if let Some(name) = self.take(TokenKind::Ident) {
             let name = name.try_into().unwrap();
 
-            let ty_args = if self.accept_op(source_map, "<") {
-                self.parse_generic(source_map)
-            } else { vec![] };
-
+            let ty_args = self.parse_generic(source_map);
             let (args, kwargs) = self.parse_args_def(source_map);
-
             let ty = self.parse_type_annotation(source_map);
-            
             let value = if self.accept(TokenKind::Eq) {
                 let expr = self.parse_expr(source_map);
 
@@ -318,26 +259,19 @@ impl Parser {
                     self.expect(TokenKind::Semicolon);
                 }
 
+                let header = FnHeader::new(name, ty_args, args, kwargs, ty);
+
                 Stmt::Expr(Expr::FnIn {
-                    name,
-                    ty_args,
-                    args,
-                    kwargs,
-                    ty,
+                    header,
                     value: Box::new(value),
                     expr: Box::new(expr)
                 })
             } else if in_expr {
                 todo!("expected `in`")
             } else {
-                Stmt::Fn {
-                    name,
-                    ty_args,
-                    args,
-                    kwargs,
-                    ty,
-                    value
-                }
+                let header = FnHeader::new(name, ty_args, args, kwargs, ty);
+
+                Stmt::Fn { header, value }
             }
         } else {
             todo!("error expected identifier")
@@ -366,15 +300,18 @@ impl Parser {
                     args.push((arg, ty));
                 }
 
-                if !in_kwargs && matches!(self.current_kind(), TokenKind::Semicolon) {
+                // start kwargs section
+                if matches!(self.current_kind(), TokenKind::Semicolon) && !in_kwargs {
                     self.advance();
                     in_kwargs = true;
 
                     if self.accept(TokenKind::RParen) {
                         todo!("expected keyword arguments after ';'")
                     }
+                // already in kwargs section
                 } else if let TokenKind::Semicolon = self.current_kind() {
-                    todo!("only on ';' allowed in argument definition")
+                    todo!("only one ';' allowed in argument definition to separate args from keyword args")
+                
                 } else if self.accept(TokenKind::RParen)
                     || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RParen)) {
                     break
@@ -407,9 +344,7 @@ impl Parser {
         else { todo!("expected ident") };
         let name = name.try_into().unwrap();
 
-        let ty_args = if self.accept_op(source_map, "<") {
-            self.parse_generic(source_map)
-        } else { vec![] };
+        let ty_args = self.parse_generic(source_map);
 
         self.expect(TokenKind::LBrace);
         if self.accept(TokenKind::RBrace) {
@@ -487,9 +422,7 @@ impl Parser {
         else { todo!("expected ident") };
         let name = name.try_into().unwrap();
 
-        let ty_args = if self.accept_op(source_map, "<") {
-            self.parse_generic(source_map)
-        } else { vec![] };
+        let ty_args = self.parse_generic(source_map);
 
         self.expect(TokenKind::LBrace);
 
@@ -517,7 +450,12 @@ impl Parser {
         Stmt::Struct { name, ty_args, fields }
     }
 
+    /// Outputs empty vector if no generic arguments are seen. 
     fn parse_generic(&mut self, source_map: &SourceMap) -> Vec<Generic> {
+        if !self.accept_op(source_map, "<") {
+            return vec![]
+        }
+        
         let mut args = vec![];
 
         if self.accept_op(source_map, ">") {
