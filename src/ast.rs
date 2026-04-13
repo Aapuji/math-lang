@@ -125,8 +125,8 @@ pub enum Expr {
         rhs: Box<Expr>
     },
     Range {
-        left: Endpoint,
-        right: Endpoint,
+        lhs: Endpoint,
+        rhs: Endpoint,
         step: RangeStep
     },
     Prefix {

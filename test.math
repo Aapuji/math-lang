@@ -1,1 +1,0 @@
-let x: Int, y: Int, z := f(x, y, z=) == 0 in x;

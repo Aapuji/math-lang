@@ -606,7 +606,7 @@ impl Parser {
     }
 
     fn parse_comparison(&mut self, source_map: &SourceMap) -> Expr {
-        let lhs = self.parse_additive(source_map);
+        let lhs = self.parse_range(source_map);
 
         macro_rules! parse_comparison {
             ($node_kind:ident) => {
@@ -664,6 +664,279 @@ impl Parser {
     }
 
     // TODO: ranges
+    fn parse_range(&mut self, source_map: &SourceMap) -> Expr {
+        let id = |x: Expr| x;
+        let pos = |x: Expr| Expr::UnaryPlus(Box::new(x));
+        let neg = |x: Expr| Expr::Neg(Box::new(x)); 
+        
+        match self.current_op(source_map) {
+            Some("..") => self.finish_discrete_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, false),
+                id),
+            Some("..+") => self.finish_discrete_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, false),
+                pos),
+            Some("..-") => self.finish_discrete_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, false),
+                neg),
+            Some("<..") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some("<..+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some("<..-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some("..<") => self.finish_discrete_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, true),
+                id),
+            Some("..<+") => self.finish_discrete_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, true),
+                pos),
+            Some("..<-") => self.finish_discrete_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, true),
+                neg),
+            Some("<..<") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some("<..<+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some("<..<-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some(":") => self.finish_cont_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, false),
+                id),
+            Some(":+") => self.finish_cont_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, false),
+                pos),
+            Some(":-") => self.finish_cont_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, false),
+                neg),
+            Some("<:") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some("<:+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some("<:-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some(":<") => self.finish_cont_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, true),
+                id),
+            Some(":<+") => self.finish_cont_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, true),
+                pos),
+            Some(":<-") => self.finish_cont_range(
+                source_map, 
+                Endpoint::Unspecified, 
+                (false, true),
+                neg),
+            Some("<:<") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some("<:<+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some("<:<-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some("::") => self.finish_range_step(source_map, Endpoint::Unspecified, Endpoint::Unspecified),
+            Some("<::") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            Some(":<:") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+            _ => {
+                let lhs = Box::new(self.parse_additive(source_map));
+
+                match self.current_op(source_map) {
+                    Some("..") => self.finish_discrete_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, false),
+                        id),
+                    Some("..+") => self.finish_discrete_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, false),
+                        pos),
+                    Some("..-") => self.finish_discrete_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, false),
+                        neg),
+                    Some("<..") => self.finish_discrete_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, false),
+                        id),
+                    Some("<..+") => self.finish_discrete_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, false),
+                        pos),
+                    Some("<..-") => self.finish_discrete_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, false),
+                        neg),
+                    Some("..<") => self.finish_discrete_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, true),
+                        id),
+                    Some("..<+") => self.finish_discrete_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, true),
+                        pos),
+                    Some("..<-") => self.finish_discrete_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, true),
+                        neg),
+                    Some("<..<") => self.finish_discrete_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, true),
+                        id),
+                    Some("<..<+") => self.finish_discrete_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, true),
+                        pos),
+                    Some("<..<-") => self.finish_discrete_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, true),
+                        neg),
+                    Some(":") => self.finish_cont_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, false),
+                        id),
+                    Some(":+") => self.finish_cont_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, false),
+                        pos),
+                    Some(":-") => self.finish_cont_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, false),
+                        neg),
+                    Some("<:") => self.finish_cont_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, false),
+                        id),
+                    Some("<:+") => self.finish_cont_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, false),
+                        pos),
+                    Some("<:-") => self.finish_cont_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, false),
+                        neg),
+                    Some(":<") => self.finish_cont_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, true),
+                        id),
+                    Some(":<+") => self.finish_cont_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, true),
+                        |x| Expr::UnaryPlus(Box::new(x))),
+                    Some(":<-") => self.finish_cont_range(
+                        source_map, 
+                        Endpoint::Inclusive(lhs), 
+                        (false, true),
+                        |x| Expr::Neg(Box::new(x))),
+                    Some("<:<") => self.finish_cont_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, true),
+                        id),
+                    Some("<:<+") => self.finish_cont_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, true),
+                        pos),
+                    Some("<:<-") => self.finish_cont_range(
+                        source_map,
+                        Endpoint::Exclusive(lhs),
+                        (true, true),
+                        neg),
+                    Some("::") => self.finish_range_step(source_map, Endpoint::Inclusive(lhs), Endpoint::Unspecified),
+                    Some("<::") => self.finish_range_step(source_map, Endpoint::Inclusive(lhs), Endpoint::Unspecified),
+                    Some(":<:") => todo!("cannot specify exclusivity for an unspecified endpoint"),
+                    _ => *lhs
+                }
+            }
+        }
+    }
+
+    fn finish_discrete_range<W: Fn(Expr) -> Expr>(&mut self, source_map: &SourceMap, lhs: Endpoint, exclusivity: (bool, bool), wrap: W) -> Expr {
+        self.advance();
+
+        if self.current().is_terminating(source_map) {
+            Expr::Range {
+                lhs,
+                rhs: Endpoint::Unspecified,
+                step: RangeStep::Discrete(Box::new(Expr::Int(1.into())))
+            }
+        } else {
+            let rhs = if exclusivity.0 {
+                Endpoint::Exclusive(Box::new(wrap(self.parse_additive(source_map))))
+            } else {
+                Endpoint::Inclusive(Box::new(wrap(self.parse_additive(source_map))))
+            };
+
+            Expr::Range {
+                lhs,
+                rhs,
+                step: RangeStep::Discrete(Box::new(Expr::Int(1.into())))
+            }
+        }
+    }
+
+    fn finish_cont_range<W: Fn(Expr) -> Expr>(&mut self, source_map: &SourceMap, lhs: Endpoint, exclusivity: (bool, bool), wrap: W) -> Expr {
+        self.advance();
+
+        if self.current().is_terminating(source_map) {
+            Expr::Range {
+                lhs,
+                rhs: Endpoint::Unspecified,
+                step: RangeStep::Continuous
+            }
+        } else if let Some(":") = self.current_op(source_map) {
+            todo!("': :' is invalid")
+        } else {
+            let rhs = if exclusivity.0 {
+                Endpoint::Exclusive(Box::new(wrap(self.parse_additive(source_map))))
+            } else {
+                Endpoint::Inclusive(Box::new(wrap(self.parse_additive(source_map))))
+            };
+
+            if let Some(":") = self.current_op(source_map) {
+                self.finish_range_step(source_map, lhs, rhs)
+            } else {
+                Expr::Range {
+                    lhs,
+                    rhs,
+                    step: RangeStep::Discrete(Box::new(Expr::Int(1.into())))
+                }
+            }
+        }
+    }
+
+    fn finish_range_step(&mut self, source_map: &SourceMap, lhs: Endpoint, rhs: Endpoint) -> Expr {
+        let step = RangeStep::Discrete(Box::new(self.parse_additive(source_map)));
+
+        Expr::Range { lhs, rhs, step }
+    }
 
     fn parse_additive(&mut self, source_map: &SourceMap) -> Expr {
         let lhs = self.parse_multiplicative(source_map);
