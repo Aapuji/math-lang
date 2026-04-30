@@ -88,8 +88,7 @@ impl Parser {
         let bindings = self.parse_bindings(source_map);
         let (kind, value) = if self.accept(TokenKind::Eq) {
             (LetKind::Assign, Some(self.parse_expr(source_map)))
-        // TODO: Change := to be a regular tokenkind rather than just a special kind of operator
-        } else if self.accept_op(source_map, ":=") {
+        } else if self.accept(TokenKind::ColonEq) {
             (LetKind::Define, Some(self.parse_expr(source_map)))
         } else {
             (LetKind::Declare, None)
@@ -1981,14 +1980,14 @@ range_span),
     }
 }
 
-/// A struct to store the macro and alias definitions for each scope. This is only used until aliases and macros have been expanded.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ExpEnv {
-    aliases: Vec<Alias>,
-    macros: Vec<Macro>,
-    parent: Option<Box<ExpEnv>>,
-    children: Vec<ExpEnv>
-}
+// A struct to store the macro and alias definitions for each scope. This is only used until aliases and macros have been expanded.
+// #[derive(Debug, Clone, PartialEq, Eq)]
+// struct ExpEnv {
+//     aliases: Vec<Alias>,
+//     macros: Vec<Macro>,
+//     parent: Option<Box<ExpEnv>>,
+//     children: Vec<ExpEnv>
+// }
 
 // TODO: Change Recursive Descent Parser into Pratt Parser for expressions
 

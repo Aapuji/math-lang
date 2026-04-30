@@ -47,7 +47,17 @@ impl<'t> Lexer<'t> {
                 } else if ch.is_whitespace() {
                     self.next();
                 } else if ch == '#' {
-                    self.lex_comment((i, ch), &mut tokens);
+                    match self.text.peek() {
+                        Some(&(_, c)) if c.is_identifier_start() || c == '(' || c == '[' || c == '{' => {
+                            tokens.push(Token::new(
+                                TokenKind::CodeSpliceIndicator,
+                                Span::new(i, i + 1, self.source)
+                            ));
+                            self.next();
+                        }
+
+                        _ => self.lex_comment((i, ch), &mut tokens)
+                    };
                 } else if ch == '(' {
                     tokens.push(Token::new(
                         TokenKind::LParen, 
@@ -101,17 +111,17 @@ impl<'t> Lexer<'t> {
                     }
 
                     self.next();
-                } else if ch == '_' && !matches!(self.text.peek(), Some(&(_, c)) if is_xid_start(c) || c == '_') {
+                } else if ch == '_' && !matches!(self.text.peek(), Some(&(_, c)) if c.is_identifier_start()) {
                     tokens.push(Token::new(
                         TokenKind::Underscore,
                         Span::new(i, i + 1, self.source)));
                     self.next();
-                } else if ch == 'i' && !matches!(self.text.peek(), Some(&(_, c)) if is_xid_start(c) || c == '_') {
+                } else if ch == 'i' && !matches!(self.text.peek(), Some(&(_, c)) if c.is_identifier_start()) {
                     tokens.push(Token::new(
                         TokenKind::Imag,
                         Span::new(i, i + 1, self.source)));
                     self.next();
-                } else if is_xid_start(ch) || ch == '_' {
+                } else if ch.is_identifier_start() {
                     self.lex_ident(false, (i, ch), &mut tokens, source_map);
                 } else if ch == '\\' {
                     match self.text.peek() {
@@ -584,10 +594,10 @@ impl<'t> Lexer<'t> {
 
         loop {
             match self.next() {
-                Some((_, ch)) if is_xid_continue(ch) || ch == '_' => {}
+                Some((_, ch)) if ch.is_identifier_start() => {}
                 Some((i, '\\')) => {
                     match self.text.peek() {
-                        Some(&(_, ch)) if is_xid_continue(ch) || ch == '_' => (),
+                        Some(&(_, ch)) if ch.is_identifier_continue() => (),
                         _ => { end = i; break } 
                     }
                 }
@@ -796,4 +806,19 @@ enum StringPrefix {
 enum LexerMode {
     String(usize, StringPrefix),
     Interpolate(usize, i32, usize) // (int_start, bracket_depth, parent string's str_start)
+}
+
+pub trait CanBeIdentifier: Copy {
+    fn is_identifier_start(self) -> bool;
+    fn is_identifier_continue(self) -> bool;
+}
+
+impl CanBeIdentifier for char {
+    fn is_identifier_start(self) -> bool {
+        is_xid_start(self) || self == '_'
+    }
+
+    fn is_identifier_continue(self) -> bool {
+        is_xid_continue(self) || self == '_'
+    }
 }

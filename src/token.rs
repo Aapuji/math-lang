@@ -15,6 +15,7 @@ pub enum TokenKind {
     DocComment,
 
     Operator, // any operator
+    CodeSpliceIndicator,
     
     Eq,
     ColonEq,

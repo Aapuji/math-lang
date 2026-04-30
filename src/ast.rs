@@ -502,35 +502,6 @@ pub enum RangeStep {
     Continuous
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Alias {
-    new: Var,
-    old: AliasSrc,
-    kind: AliasKind
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AliasSrc {
-    Ident(Var),
-    Operator(Operation),
-    Expr(Expr)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AliasKind {
-    Ident,
-    Operator
-}
-
-// TODO: this
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Macro {
-    name: Var,
-    arity: u8,
-
-    // block: Expr
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
     Ident(Var),
@@ -543,3 +514,32 @@ pub enum StringPart {
     Text(String),        // converts escape sequences
     Expr(Expr)
 }
+
+// #[derive(Debug, Clone, PartialEq, Eq)]
+// pub struct Alias {
+//     new: Var,
+//     old: AliasSrc,
+//     kind: AliasKind
+// }
+
+// #[derive(Debug, Clone, PartialEq, Eq)]
+// pub enum AliasSrc {
+//     Ident(Var),
+//     Operator(Operation),
+//     Expr(Expr)
+// }
+
+// #[derive(Debug, Clone, PartialEq, Eq)]
+// pub enum AliasKind {
+//     Ident,
+//     Operator
+// }
+
+// // TODO: this
+// #[derive(Debug, Clone, PartialEq, Eq)]
+// pub struct Macro {
+//     name: Var,
+//     arity: u8,
+
+//     // block: Expr
+// }
