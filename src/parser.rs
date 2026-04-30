@@ -4,7 +4,7 @@ use std::vec::IntoIter;
 use rug::{Integer, Rational};
 
 use crate::ast::*;
-use crate::source::SourceMap;
+use crate::source::{SourceMap, Span};
 use crate::token::{Token, TokenKind};
 
 type TokenStream = Peekable<Chain<IntoIter<Token>, Repeat<Token>>>;
@@ -82,6 +82,7 @@ impl Parser {
     }
 
     fn parse_let(&mut self, source_map: &SourceMap, in_expr: bool) -> Stmt {
+        let span_start = self.current().span().start();
         self.accept(TokenKind::Let);
 
         let bindings = self.parse_bindings(source_map);
@@ -97,17 +98,33 @@ impl Parser {
         if self.accept(TokenKind::In) {
             let expr = self.parse_expr(source_map);
 
-            if !in_expr {
+            let span_end = if in_expr {
+                expr.span().end()
+            } else {
+                let span_end = self.current().span().end();
                 self.expect(TokenKind::Semicolon);
-            }
+                
+                span_end
+            };
 
-            Stmt::Expr(Expr::LetIn(Box::new(Let::new(bindings, kind, value)), Box::new(expr)))
+            Stmt::Expr {
+                span: Span::new(span_start, span_end, self.current().span().source_id()),
+                expr: Expr::LetIn {
+                    span: Span::new(span_start, expr.span().end(), expr.span().source_id()),
+                    def: Box::new(Let::new(bindings, kind, value)),
+                    expr: Box::new(expr)
+                }
+            }
         } else if in_expr {
             todo!("expected 'in'")
         } else {
+            let span_end = self.current().span().end();
             self.expect(TokenKind::Semicolon);
 
-            Stmt::Let(Let::new(bindings, kind, value))
+            Stmt::Let {
+                span: Span::new(span_start, span_end, self.current().span().source_id()),
+                def: Let::new(bindings, kind, value)
+            }
         }
     }
 
@@ -117,7 +134,7 @@ impl Parser {
         loop {
             bindings.push(self.parse_binding(source_map));
 
-            println!("HERE IN BDINING: {:?}", self.current());
+            println!("HERE IN BINDING: {:?}", self.current());
 
             if self.accept(TokenKind::Comma) {
                 continue
@@ -129,207 +146,276 @@ impl Parser {
         bindings
     }
 
+    // TODO: Record, Tuple, Destructuring, Rest, and _ bindings, and distinguishing Tuple Constructor from Function Call
     fn parse_binding(&mut self, source_map: &SourceMap) -> Binding {
-        let Some(name) = self.require(TokenKind::Ident)
-        else { todo!("expected ident") };
-        let name = name.try_into().unwrap();
+        let name: Var = self.require(TokenKind::Ident)
+            .unwrap_or_else(|| todo!("identifier expected"))
+            .try_into()
+            .unwrap();
+        let span_start = name.span().start();
 
-        if let TokenKind::LParen = self.current_kind() {
-            // let ty_args = self.parse_generic(source_map);
-            let ty_args = vec![]; // todo this
-            let (args, kwargs) = self.parse_args_def(source_map);
-            let ty = self.parse_type_annotation(source_map);
-
-            Binding::Call(FnHeader::new(name, ty_args, args, kwargs, ty))
+        if let Some("<") = self.current_op(source_map) {
+            Binding::Fn(self.finish_header(source_map, name, span_start))
+        } else if let TokenKind::LParen = self.current_kind() {
+            Binding::Call(self.finish_header(source_map, name, span_start))
         } else {
-            let ty = self.parse_type_annotation(source_map);
-            
-            Binding::Name(name, ty)
+            Binding::Name(name, self.parse_type_annotation(source_map))
         }
     }
 
     fn parse_var(&mut self, source_map: &SourceMap, in_expr: bool) -> Stmt {        
+        let span_start = self.current().span().start();
         self.accept(TokenKind::Var);
         
-        if let TokenKind::Ident = self.current_kind() {
-            let name = self.current().try_into().unwrap();
-            self.advance();
+        let TokenKind::Ident = self.current_kind()
+        else { todo!("expected identifier") };
 
-            let ty = self.parse_type_annotation(source_map);
+        let name = self.current().try_into().unwrap();
+        self.advance();
 
-            let def = if self.accept(TokenKind::Eq) {
-                Some(self.parse_expr(source_map))
-            } else { None };
+        let ty = self.parse_type_annotation(source_map);
+        let def = if self.accept(TokenKind::Eq) {
+            Some(self.parse_expr(source_map))
+        } else { None };
 
-            if self.accept(TokenKind::In) {
-                let expr = self.parse_expr(source_map);
-                
-                if !in_expr {
-                    self.expect(TokenKind::Semicolon);
-                }
+        if self.accept(TokenKind::In) {
+            let expr = self.parse_expr(source_map);
 
-                Stmt::Expr(Expr::VarIn {
-                    name,
-                    ty,
-                    value: def.map(Box::new),
-                    expr: Box::new(expr)
-                })
-            } else if in_expr {
-                todo!("expected `in`")
+            let span_end = if in_expr {
+                expr.span().end()
             } else {
+                let span_end = self.current().span().end();
                 self.expect(TokenKind::Semicolon);
-                Stmt::Var {
-                    name,
-                    ty,
-                    value: def
-                }
+                
+                span_end
+            };
+
+            let var_in_expr = Expr::VarIn {
+                span: Span::new(span_start, expr.span().end(), expr.span().source_id()),
+                name,
+                ty,
+                value: def.map(Box::new),
+                expr: Box::new(expr)
+            };
+
+            Stmt::Expr {
+                span: Span::new(var_in_expr.span().start(), span_end, var_in_expr.span().source_id()),
+                expr: var_in_expr
             }
+        } else if in_expr {
+            todo!("expected `in`")
         } else {
-            todo!()
+            let span_end = self.current().span().end();
+            self.expect(TokenKind::Semicolon);
+
+            Stmt::Var {
+                span: Span::new(span_start, span_end, self.current().span().source_id()),
+                name,
+                ty,
+                value: def
+            }
         }
     }
 
     fn parse_const(&mut self, source_map: &SourceMap, in_expr: bool) -> Stmt {        
+        let span_start = self.current().span().start();
         self.accept(TokenKind::Const);
         
-        if let TokenKind::Ident = self.current_kind() {
-            let name = self.current().try_into().unwrap();
-            self.advance();
+        let TokenKind::Ident = self.current_kind()
+        else { todo!("expected identifier") };
 
-            let ty = self.parse_type_annotation(source_map);
+        let name = self.current().try_into().unwrap();
+        self.advance();
 
-            let def = if self.accept(TokenKind::Eq) {
-                Some(self.parse_expr(source_map))
-            } else { None };
+        let ty = self.parse_type_annotation(source_map);
+        let def = if self.accept(TokenKind::Eq) {
+            Some(self.parse_expr(source_map))
+        } else { None };
 
-            if self.accept(TokenKind::In) {
-                let expr = self.parse_expr(source_map);
+        if self.accept(TokenKind::In) {
+            let expr = self.parse_expr(source_map);
 
-                if !in_expr {
-                    self.expect(TokenKind::Semicolon);
-                }
-
-                Stmt::Expr(Expr::ConstIn {
-                    name,
-                    ty,
-                    value: def.map(Box::new),
-                    expr: Box::new(expr)
-                })
-            } else if in_expr {
-                todo!("expected `in`")
+            let span_end = if in_expr {
+                expr.span().end()
             } else {
+                let span_end = self.current().span().end();
                 self.expect(TokenKind::Semicolon);
-                Stmt::Const {
-                    name,
-                    ty,
-                    value: def
-                }
+                
+                span_end
+            };
+
+            let const_in_expr = Expr::ConstIn {
+                span: Span::new(span_start, expr.span().end(), expr.span().source_id()),
+                name,
+                ty,
+                value: def.map(Box::new),
+                expr: Box::new(expr)
+            };
+
+            Stmt::Expr {
+                span: Span::new(const_in_expr.span().start(), span_end, const_in_expr.span().source_id()),
+                expr: const_in_expr
             }
+        } else if in_expr {
+            todo!("expected `in`")
         } else {
-            todo!()
+            let span_end = self.current().span().end();
+            self.expect(TokenKind::Semicolon);
+
+            Stmt::Const {
+                span: Span::new(span_start, span_end, self.current().span().source_id()),
+                name,
+                ty,
+                value: def
+            }
         }
     }
 
     fn parse_fn(&mut self, source_map: &SourceMap, in_expr: bool) -> Stmt {
+        let span_start = self.current().span().start();
         self.accept(TokenKind::Fn);
 
-        if let Some(name) = self.take(TokenKind::Ident) {
-            let name = name.try_into().unwrap();
+        let header = self.parse_header(source_map);
+        let (span_end, value) = if self.accept(TokenKind::Eq) {
+            let expr = self.parse_expr(source_map);
 
-            let ty_args = self.parse_generic(source_map);
-            let (args, kwargs) = self.parse_args_def(source_map);
-            let ty = self.parse_type_annotation(source_map);
-            let value = if self.accept(TokenKind::Eq) {
-                let expr = self.parse_expr(source_map);
-
-                if !in_expr {
-                    self.expect(TokenKind::Semicolon);
-                }
-
-                expr
+            let span_end = if in_expr {
+                expr.span().end()
             } else {
-                self.expect(TokenKind::LBrace);
-                self.parse_block(source_map)
+                let span_end = self.current().span().end();
+                self.expect(TokenKind::Semicolon);
+
+                span_end
             };
 
-            if self.accept(TokenKind::In) {
-                let expr = self.parse_expr(source_map);
+            (span_end, expr)
+        } else if let TokenKind::LBrace = self.current_kind() {
+            let block = self.parse_block(source_map);
 
-                if !in_expr {
-                    self.expect(TokenKind::Semicolon);
-                }
-
-                let header = FnHeader::new(name, ty_args, args, kwargs, ty);
-
-                Stmt::Expr(Expr::FnIn {
-                    header,
-                    value: Box::new(value),
-                    expr: Box::new(expr)
-                })
-            } else if in_expr {
-                todo!("expected `in`")
-            } else {
-                let header = FnHeader::new(name, ty_args, args, kwargs, ty);
-
-                Stmt::Fn { header, value }
-            }
+            (block.span().end(), block)
         } else {
-            todo!("error expected identifier")
+            todo!("expected block for fn def");
+        };
+
+        if self.accept(TokenKind::In) {
+            let expr = self.parse_expr(source_map);
+
+            let span_end = if in_expr {
+                expr.span().end()
+            } else {
+                let span_end = self.current().span().end();
+                self.expect(TokenKind::Semicolon);
+
+                span_end
+            };
+
+            let fn_in_expr = Expr::FnIn {
+                span: Span::new(span_start, expr.span().end(), expr.span().source_id()),
+                header,
+                value: Box::new(value),
+                expr: Box::new(expr) 
+            };
+
+            Stmt::Expr {
+                span: Span::new(fn_in_expr.span().start(), span_end, fn_in_expr.span().source_id()),
+                expr: fn_in_expr
+            }
+        } else if in_expr {
+            todo!("expected `in`")
+        } else {
+            Stmt::Fn {
+                span: Span::new(span_start, span_end, self.current().span().source_id()),
+                header,
+                value,
+            }
         }
     }
 
-    fn parse_args_def(&mut self, source_map: &SourceMap) -> (Vec<(Var, Option<Type>)>, Vec<(Var, Option<Type>)>) {
+    fn parse_header(&mut self, source_map: &SourceMap) -> FnHeader {
+        let name: Var = self.require(TokenKind::Ident)
+            .unwrap_or_else(|| todo!("identifier expected"))
+            .try_into()
+            .unwrap();
+        let span_start = name.span().start();
+
+        self.finish_header(source_map, name, span_start)
+    }
+
+    fn finish_header(&mut self, source_map: &SourceMap, name: Var, span_start: usize) -> FnHeader {
+        let ty_args = self.parse_generic(source_map);
+        let (args, kwargs, args_span_end) = self.parse_args_def(source_map);
+        let ty = self.parse_type_annotation(source_map);
+
+        let span_end = if let Some(ref ty) = ty {
+            ty.span().end()
+        } else {
+            args_span_end
+        };
+
+        FnHeader::new(
+            name,
+            ty_args,
+            args,
+            kwargs,
+            ty,
+            Span::new(span_start, span_end, self.current().span().source_id())
+        )
+    }
+
+    fn parse_args_def(&mut self, source_map: &SourceMap) -> (Vec<(Var, Option<Type>)>, Vec<(Var, Option<Type>)>, usize) {
         let mut args = vec![];
         let mut kwargs = vec![];
         let mut in_kwargs = false;
-        
+
         self.expect(TokenKind::LParen);
         
-        if self.accept(TokenKind::RParen) {
-            return (args, kwargs);
+        if let Some(rp) = self.take(TokenKind::RParen) {
+            return (args, kwargs, rp.span().end());
         }
 
         loop {
-            if let Some(arg) = self.take(TokenKind::Ident) {
-                let arg = arg.try_into().unwrap();
-                let ty = self.parse_type_annotation(source_map);
-                
-                if in_kwargs {
-                    kwargs.push((arg, ty));
-                } else {
-                    args.push((arg, ty));
-                }
+            let Some(arg) = self.take(TokenKind::Ident) 
+            else { todo!("expected identifier") };
 
-                // start kwargs section
-                if matches!(self.current_kind(), TokenKind::Semicolon) && !in_kwargs {
-                    self.advance();
-                    in_kwargs = true;
-
-                    if self.accept(TokenKind::RParen) {
-                        todo!("expected keyword arguments after ';'")
-                    }
-                // already in kwargs section
-                } else if let TokenKind::Semicolon = self.current_kind() {
-                    todo!("only one ';' allowed in argument definition to separate args from keyword args")
-                
-                } else if self.accept(TokenKind::RParen)
-                    || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RParen)) {
-                    break
-                }
+            let arg = arg.try_into().unwrap();
+            let ty = self.parse_type_annotation(source_map);
+            
+            if in_kwargs {
+                kwargs.push((arg, ty));
             } else {
-                todo!("expected ident")
+                args.push((arg, ty));
+            }
+
+            // start kwargs section
+            if matches!(self.current_kind(), TokenKind::Semicolon) && !in_kwargs {
+                self.advance();
+                in_kwargs = true;
+
+                if self.accept(TokenKind::RParen) {
+                    todo!("expected keyword arguments after ';'")
+                }
+            // already in kwargs section
+            } else if let TokenKind::Semicolon = self.current_kind() {
+                todo!("only one ';' allowed in argument definition to separate args from keyword args")
+            
+            } else {
+                if let Some(rp) = self.take(TokenKind::RParen) {
+                    return (args, kwargs, rp.span().end())
+                } else if self.expect(TokenKind::Comma) {
+                    if let Some(rp) = self.take(TokenKind::RParen) {
+                        return (args, kwargs, rp.span().end())
+                    }
+                }
             }
         }
-
-        (args, kwargs)
     }
 
     /// Attempts to parse a type annotation. Either it will be a regular type annotation, or an implicit refinement type annotation, or there may be no type annotation, in which it will output None.
     fn parse_type_annotation(&mut self, source_map: &SourceMap) -> Option<Type> {
-        // : T
+        // : Type
         if self.accept_op(source_map, ":") {
             Some(self.parse_type(source_map))
-        // :: r
+        // :: Implicit Refinement
         } else if self.accept_op(source_map, "::") {
             todo!()
         } else {
@@ -338,6 +424,7 @@ impl Parser {
     }
 
     fn parse_enum(&mut self, source_map: &SourceMap) -> Stmt {
+        let span_start = self.current().span().start();
         self.accept(TokenKind::Enum);
 
         let Some(name) = self.require(TokenKind::Ident)
@@ -347,11 +434,12 @@ impl Parser {
         let ty_args = self.parse_generic(source_map);
 
         self.expect(TokenKind::LBrace);
-        if self.accept(TokenKind::RBrace) {
+        if let Some(rb) = self.take(TokenKind::RBrace) {
             return Stmt::Enum {
                 name,
                 ty_args,
-                variants: vec![]
+                variants: vec![],
+                span: Span::new(span_start, rb.span().end(), rb.span().source_id()),
             };
         }
 
@@ -406,16 +494,28 @@ impl Parser {
                 variants.push(Variant::Const(name));
             }
             
-            if self.accept(TokenKind::RBrace) 
-                || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RBrace)) {
-                break
+            if let Some(rb) = self.take(TokenKind::RBrace) {
+                return Stmt::Enum {
+                    name,
+                    ty_args,
+                    variants,
+                    span: Span::new(span_start, rb.span().end(), rb.span().source_id()),
+                }
+            } else if self.expect(TokenKind::Comma) {
+                if let Some(rb) = self.take(TokenKind::RBrace) {
+                    return Stmt::Enum {
+                        name,
+                        ty_args,
+                        variants,
+                        span: Span::new(span_start, rb.span().end(), rb.span().source_id()),
+                    }
+                }
             }
         }
-
-        Stmt::Enum { name, ty_args, variants }
     }
 
     fn parse_struct(&mut self, source_map: &SourceMap) -> Stmt {
+        let span_start = self.current().span().start();
         self.accept(TokenKind::Struct);
 
         let Some(name) = self.require(TokenKind::Ident)
@@ -426,8 +526,13 @@ impl Parser {
 
         self.expect(TokenKind::LBrace);
 
-        if self.accept(TokenKind::RBrace) {
-            return Stmt::Struct { name, ty_args, fields: vec![] };
+        if let Some(rb) = self.take(TokenKind::RBrace) {
+            return Stmt::Struct {
+                name,
+                ty_args,
+                fields: vec![],
+                span: Span::new(span_start, rb.span().end(), rb.span().source_id()),
+            };
         }
 
         let mut fields = vec![];
@@ -441,13 +546,24 @@ impl Parser {
 
             fields.push((field, ty));
 
-            if self.accept(TokenKind::RBrace)
-                || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RBrace)) {
-                break
-            } 
+            if let Some(rb) = self.take(TokenKind::RBrace) {
+                return Stmt::Struct {
+                    name,
+                    ty_args,
+                    fields,
+                    span: Span::new(span_start, rb.span().end(), rb.span().source_id())
+                }
+            } else if self.expect(TokenKind::Comma) {
+                if let Some(rb) = self.take(TokenKind::RBrace) {
+                    return Stmt::Struct {
+                        name,
+                        ty_args,
+                        fields,
+                        span: Span::new(span_start, rb.span().end(), rb.span().source_id())
+                    }
+                }
+            }
         }
-
-        Stmt::Struct { name, ty_args, fields }
     }
 
     /// Outputs empty vector if no generic arguments are seen. 
@@ -513,15 +629,18 @@ impl Parser {
     fn parse_expr_stmt(&mut self, source_map: &SourceMap) -> Stmt {
         let expr = self.parse_expr(source_map);
 
-        if self.accept(TokenKind::Semicolon) || self.accept(TokenKind::EOF) {
-            Stmt::Expr(expr)
+        if let Some(semi) = self.take(TokenKind::Semicolon) {
+            Stmt::Expr {
+                span: Span::new(expr.span().start(), semi.span().end(), semi.span().source_id()),
+                expr
+            }
         } else {
             todo!("report error - expected semicolon")
         }
     }
 
     fn parse_expr(&mut self, source_map: &SourceMap) -> Expr {
-        if self.accept(TokenKind::LBrace) {
+        if let TokenKind::LBrace = self.peek_kind() {
             self.parse_block(source_map)
         } else {
             self.parse_or(source_map)
@@ -529,6 +648,9 @@ impl Parser {
     }
 
     fn parse_block(&mut self, source_map: &SourceMap) -> Expr {
+        let span_start = self.current().span().start();
+        self.accept(TokenKind::LBrace);
+        
         let mut stmts = vec![];
         let mut tail = None;
 
@@ -539,8 +661,11 @@ impl Parser {
             } else {
                 let expr = self.parse_expr(source_map);
 
-                if self.accept(TokenKind::Semicolon) {
-                    stmts.push(Stmt::Expr(expr));
+                if let Some(semi) = self.take(TokenKind::Semicolon) {
+                    stmts.push(Stmt::Expr {
+                        span: Span::new(expr.span().start(), semi.span().end(), semi.span().source_id()),
+                        expr
+                    });
                 } else {
                     tail = Some(Box::new(expr));
                     break
@@ -548,8 +673,13 @@ impl Parser {
             }
         }
 
+        let span = Span::new(span_start, self.current().span().end(), self.current().span().source_id());
         self.expect(TokenKind::RBrace);
-        Expr::Block { stmts, tail }
+        Expr::Block {
+            stmts,
+            tail,
+            span
+        }
     }
 
     fn parse_or(&mut self, source_map: &SourceMap) -> Expr {
@@ -559,6 +689,7 @@ impl Parser {
             let rhs = Box::new(self.parse_or(source_map));
 
             Expr::Or {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -574,6 +705,7 @@ impl Parser {
             let rhs = Box::new(self.parse_xor(source_map));
 
             Expr::Xor {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -589,6 +721,7 @@ impl Parser {
             let rhs = Box::new(self.parse_and(source_map));
 
             Expr::And {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -599,7 +732,12 @@ impl Parser {
 
     fn parse_not(&mut self, source_map: &SourceMap) -> Expr {
         if self.accept(TokenKind::Not) {
-            Expr::Not(Box::new(self.parse_not(source_map)))
+            let expr = self.parse_not(source_map);
+            
+            Expr::Not {
+                span: Span::new(expr.span().start(), expr.span().end(), expr.span().source_id()),
+                expr: Box::new(expr)
+            }
         } else {
             self.parse_comparison(source_map)
         }
@@ -614,7 +752,9 @@ impl Parser {
                     let rhs = self.parse_comparison(source_map);
                     if let Some((lhsr, _)) = rhs.is_comparison_node() {
                         Expr::And {
+                            span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                             lhs: Box::new(Expr::$node_kind {
+                                span: Span::new(lhs.span().start(), lhsr.span().end(), lhsr.span().source_id()),
                                 lhs: Box::new(lhs),
                                 rhs: lhsr.to_owned()
                             }),
@@ -623,7 +763,9 @@ impl Parser {
                     } else if let Expr::And { lhs: ref lhsr, .. } = rhs {
                         if let Some((lhsr, _)) = lhsr.is_comparison_node() {
                             Expr::And {
+                                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                                 lhs: Box::new(Expr::$node_kind {
+                                    span: Span::new(lhs.span().start(), lhsr.span().end(), lhsr.span().source_id()),
                                     lhs: Box::new(lhs),
                                     rhs: lhsr.to_owned()
                                 }),
@@ -634,6 +776,7 @@ impl Parser {
                         }
                     } else {
                         Expr::$node_kind {
+                            span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                             lhs: Box::new(lhs),
                             rhs: Box::new(rhs)
                         }
@@ -657,34 +800,48 @@ impl Parser {
         } else if self.accept(TokenKind::SlashIn) {
             parse_comparison!(In)
         } else if self.accept(TokenKind::SlashNotIn) {
-            Expr::Not(Box::new(parse_comparison!(In)))
+            let expr = parse_comparison!(In);
+            
+            Expr::Not {
+                span: Span::new(expr.span().start(), expr.span().end(), expr.span().source_id()),
+                expr: Box::new(expr),
+            }
         } else {
             lhs
         }
     }
 
-    // TODO: ranges
     fn parse_range(&mut self, source_map: &SourceMap) -> Expr {
-        let id = |x: Expr| x;
-        let pos = |x: Expr| Expr::UnaryPlus(Box::new(x));
-        let neg = |x: Expr| Expr::Neg(Box::new(x)); 
-        
+        let id = |x: Expr, _range_span: Span| x;
+        let pos = |x: Expr, range_span: Span| Expr::UnaryPlus {
+            span: Span::new(range_span.end() - 1, x.span().end(), x.span().source_id()),
+            expr: Box::new(x)
+        };
+        let neg = |x: Expr, range_span: Span| Expr::Neg {
+            span: Span::new(range_span.end() - 1, x.span().end(), x.span().source_id()),
+            expr: Box::new(x)
+        }; 
+
+        let range_span = self.current().span();
         match self.current_op(source_map) {
             Some("..") => self.finish_discrete_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, false),
-                id),
+                id,
+                range_span),
             Some("..+") => self.finish_discrete_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, false),
-                pos),
+                pos,
+                range_span),
             Some("..-") => self.finish_discrete_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, false),
-                neg),
+                neg,
+                range_span),
             Some("<..") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<..+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<..-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
@@ -692,17 +849,20 @@ impl Parser {
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, true),
-                id),
+                id,
+                range_span),
             Some("..<+") => self.finish_discrete_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, true),
-                pos),
+                pos,
+range_span),
             Some("..<-") => self.finish_discrete_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, true),
-                neg),
+                neg,
+                    range_span),
             Some("<..<") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<..<+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<..<-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
@@ -710,17 +870,20 @@ impl Parser {
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, false),
-                id),
+                id,
+                range_span),
             Some(":+") => self.finish_cont_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, false),
-                pos),
+                pos,
+                range_span),
             Some(":-") => self.finish_cont_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, false),
-                neg),
+                neg,
+                range_span),
             Some("<:") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<:+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<:-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
@@ -728,149 +891,177 @@ impl Parser {
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, true),
-                id),
+                id,
+                range_span),
             Some(":<+") => self.finish_cont_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, true),
-                pos),
+                pos,
+                range_span),
             Some(":<-") => self.finish_cont_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, true),
-                neg),
+                neg,
+                range_span),
             Some("<:<") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<:<+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<:<-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
-            Some("::") => self.finish_range_step(source_map, Endpoint::Unspecified, Endpoint::Unspecified),
+            Some("::") => self.finish_range_step(source_map, Endpoint::Unspecified, Endpoint::Unspecified, range_span.start()),
             Some("<::") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some(":<:") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             _ => {
                 let lhs = Box::new(self.parse_additive(source_map));
 
+                let range_span = self.current().span();
                 match self.current_op(source_map) {
                     Some("..") => self.finish_discrete_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, false),
-                        id),
+                        id,
+                        range_span),
                     Some("..+") => self.finish_discrete_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, false),
-                        pos),
+                        pos,
+                    range_span),
                     Some("..-") => self.finish_discrete_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, false),
-                        neg),
+                        neg,
+                        range_span),
                     Some("<..") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
-                        id),
+                        id,
+                        range_span),
                     Some("<..+") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
-                        pos),
+                        pos,
+                        range_span),
                     Some("<..-") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
-                        neg),
+                        neg,
+                        range_span),
                     Some("..<") => self.finish_discrete_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
-                        id),
+                        id,
+                        range_span),
                     Some("..<+") => self.finish_discrete_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
-                        pos),
+                        pos,
+                        range_span),
                     Some("..<-") => self.finish_discrete_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
-                        neg),
+                        neg,
+                        range_span),
                     Some("<..<") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
-                        id),
+                        id,
+                        range_span),
                     Some("<..<+") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
-                        pos),
+                        pos,
+                        range_span),
                     Some("<..<-") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
-                        neg),
+                        neg,
+                        range_span),
                     Some(":") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, false),
-                        id),
+                        id,
+                        range_span),
                     Some(":+") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, false),
-                        pos),
+                        pos,
+                        range_span),
                     Some(":-") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, false),
-                        neg),
+                        neg,
+                        range_span),
                     Some("<:") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
-                        id),
+                        id,
+                        range_span),
                     Some("<:+") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
-                        pos),
+                        pos,
+                        range_span),
                     Some("<:-") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
-                        neg),
+                        neg,
+                        range_span),
                     Some(":<") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
-                        id),
+                        id,
+                        range_span),
                     Some(":<+") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
-                        |x| Expr::UnaryPlus(Box::new(x))),
+                        pos,
+                        range_span),
                     Some(":<-") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
-                        |x| Expr::Neg(Box::new(x))),
+                        neg,
+                        range_span),
                     Some("<:<") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
-                        id),
+                        id,
+                        range_span),
                     Some("<:<+") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
-                        pos),
+                        pos,
+                        range_span),
                     Some("<:<-") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
-                        neg),
-                    Some("::") => self.finish_range_step(source_map, Endpoint::Inclusive(lhs), Endpoint::Unspecified),
-                    Some("<::") => self.finish_range_step(source_map, Endpoint::Inclusive(lhs), Endpoint::Unspecified),
+                        neg,
+                        range_span),
+                    Some("::") => self.finish_range_step(source_map, Endpoint::Inclusive(lhs), Endpoint::Unspecified, range_span.start()),
+                    Some("<::") => self.finish_range_step(source_map, Endpoint::Inclusive(lhs), Endpoint::Unspecified, range_span.start()),
                     Some(":<:") => todo!("cannot specify exclusivity for an unspecified endpoint"),
                     _ => *lhs
                 }
@@ -878,35 +1069,58 @@ impl Parser {
         }
     }
 
-    fn finish_discrete_range<W: Fn(Expr) -> Expr>(&mut self, source_map: &SourceMap, lhs: Endpoint, exclusivity: (bool, bool), wrap: W) -> Expr {
+    fn finish_discrete_range<W: Fn(Expr, Span) -> Expr>(&mut self, source_map: &SourceMap, lhs: Endpoint, exclusivity: (bool, bool), wrap: W, range_span: Span) -> Expr {
         self.advance();
+
+        let span_start = match lhs {
+            Endpoint::Unspecified => range_span.start(),
+            Endpoint::Inclusive(ref lhs) |
+            Endpoint::Exclusive(ref lhs) => lhs.span().start()
+        };
 
         if self.current().is_terminating(source_map) {
             Expr::Range {
+                span: Span::new(span_start, range_span.end(), range_span.source_id()),
                 lhs,
                 rhs: Endpoint::Unspecified,
-                step: RangeStep::Discrete(Box::new(Expr::Int(1.into())))
+                step: RangeStep::Discrete(Box::new(Expr::Int {
+                    value: 1.into(),
+                    span: SourceMap::synthetic_span()
+                }))
             }
         } else {
-            let rhs = if exclusivity.0 {
-                Endpoint::Exclusive(Box::new(wrap(self.parse_additive(source_map))))
+            let (rhs_span, rhs) = if exclusivity.1 {
+                let expr = self.parse_additive(source_map);
+                (expr.span(), Endpoint::Exclusive(Box::new(wrap(expr, range_span))))
             } else {
-                Endpoint::Inclusive(Box::new(wrap(self.parse_additive(source_map))))
+                let expr = self.parse_additive(source_map);
+                (expr.span(), Endpoint::Inclusive(Box::new(wrap(expr, range_span))))
             };
 
             Expr::Range {
+                span: Span::new(span_start, rhs_span.end(), rhs_span.source_id()),
                 lhs,
                 rhs,
-                step: RangeStep::Discrete(Box::new(Expr::Int(1.into())))
+                step: RangeStep::Discrete(Box::new(Expr::Int {
+                    value: 1.into(),
+                    span: SourceMap::synthetic_span()
+                }))
             }
         }
     }
 
-    fn finish_cont_range<W: Fn(Expr) -> Expr>(&mut self, source_map: &SourceMap, lhs: Endpoint, exclusivity: (bool, bool), wrap: W) -> Expr {
+    fn finish_cont_range<W: Fn(Expr, Span) -> Expr>(&mut self, source_map: &SourceMap, lhs: Endpoint, exclusivity: (bool, bool), wrap: W, range_span: Span) -> Expr {
         self.advance();
+
+        let span_start = match lhs {
+            Endpoint::Unspecified => range_span.start(),
+            Endpoint::Inclusive(ref lhs) |
+            Endpoint::Exclusive(ref lhs) => lhs.span().start()
+        };
 
         if self.current().is_terminating(source_map) {
             Expr::Range {
+                span: Span::new(span_start, range_span.end(), range_span.source_id()),
                 lhs,
                 rhs: Endpoint::Unspecified,
                 step: RangeStep::Continuous
@@ -914,28 +1128,41 @@ impl Parser {
         } else if let Some(":") = self.current_op(source_map) {
             todo!("': :' is invalid")
         } else {
-            let rhs = if exclusivity.0 {
-                Endpoint::Exclusive(Box::new(wrap(self.parse_additive(source_map))))
+            let (rhs_span, rhs) = if exclusivity.1 {
+                let expr = self.parse_additive(source_map);
+                (expr.span(), Endpoint::Exclusive(Box::new(wrap(expr, range_span))))
             } else {
-                Endpoint::Inclusive(Box::new(wrap(self.parse_additive(source_map))))
+                let expr = self.parse_additive(source_map);
+                (expr.span(), Endpoint::Inclusive(Box::new(wrap(expr, range_span))))
             };
 
-            if let Some(":") = self.current_op(source_map) {
-                self.finish_range_step(source_map, lhs, rhs)
+            if self.accept_op(source_map, ":") {
+                self.finish_range_step(source_map, lhs, rhs, span_start)
             } else {
                 Expr::Range {
+                    span: Span::new(span_start, rhs_span.end(), rhs_span.source_id()),
                     lhs,
                     rhs,
-                    step: RangeStep::Discrete(Box::new(Expr::Int(1.into())))
+                    step: RangeStep::Discrete(Box::new(Expr::Int {
+                        value: 1.into(),
+                        span: SourceMap::synthetic_span()
+                    }))
                 }
             }
         }
     }
 
-    fn finish_range_step(&mut self, source_map: &SourceMap, lhs: Endpoint, rhs: Endpoint) -> Expr {
-        let step = RangeStep::Discrete(Box::new(self.parse_additive(source_map)));
+    fn finish_range_step(&mut self, source_map: &SourceMap, lhs: Endpoint, rhs: Endpoint, span_start: usize) -> Expr {        
+        let expr = self.parse_additive(source_map);
+        let step_span = expr.span();
+        let step = RangeStep::Discrete(Box::new(expr));
 
-        Expr::Range { lhs, rhs, step }
+        Expr::Range {
+            lhs,
+            rhs,
+            step,
+            span: Span::new(span_start, step_span.end(), step_span.source_id())
+        }
     }
 
     fn parse_additive(&mut self, source_map: &SourceMap) -> Expr {
@@ -945,6 +1172,7 @@ impl Parser {
             let rhs = Box::new(self.parse_additive(source_map));
 
             Expr::Plus {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -952,6 +1180,7 @@ impl Parser {
             let rhs = Box::new(self.parse_additive(source_map));
 
             Expr::Minus {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -959,6 +1188,7 @@ impl Parser {
             let rhs = Box::new(self.parse_additive(source_map));
 
             Expr::PlusMinus {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -966,6 +1196,7 @@ impl Parser {
             let rhs = Box::new(self.parse_additive(source_map));
 
             Expr::MinusPlus {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -981,6 +1212,7 @@ impl Parser {
             let rhs = Box::new(self.parse_multiplicative(source_map));
 
             Expr::Times {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -988,6 +1220,7 @@ impl Parser {
             let rhs = Box::new(self.parse_multiplicative(source_map));
 
             Expr::Divide {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -995,6 +1228,7 @@ impl Parser {
             let rhs = Box::new(self.parse_multiplicative(source_map));
 
             Expr::IntDivide {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -1002,6 +1236,7 @@ impl Parser {
             let rhs = Box::new(self.parse_multiplicative(source_map));
 
             Expr::Mod {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -1009,6 +1244,7 @@ impl Parser {
             let rhs = Box::new(self.parse_multiplicative(source_map));
 
             Expr::ModClass {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -1024,6 +1260,7 @@ impl Parser {
             let rhs = Box::new(self.parse_exponentative(source_map));
 
             Expr::Exp {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                 lhs: Box::new(lhs),
                 rhs
             }
@@ -1046,12 +1283,13 @@ impl Parser {
                     };
 
                     Expr::Infix {
+                        span: Span::new($lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                         lhs: Box::new($lhs),
                         operator: Operation::Ident(operator.try_into().unwrap()),
                         rhs: Box::new(rhs)
                     }
                 } else if self.accept(TokenKind::Backtick) {
-                    if let Ok(name) = self.parse_operator_literal(source_map, "2") {                        
+                    if let Ok(name) = self.parse_operator_literal() {                        
                         let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
                             unary
                         } else {
@@ -1059,6 +1297,7 @@ impl Parser {
                         };
 
                         Expr::Infix {
+                            span: Span::new($lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                             lhs: Box::new($lhs),
                             operator: Operation::OpLit(name),
                             rhs: Box::new(rhs)
@@ -1077,6 +1316,7 @@ impl Parser {
                     };
 
                     Expr::Infix {
+                        span: Span::new($lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                         lhs: Box::new($lhs),
                         operator: Operation::Custom(operator),
                         rhs: Box::new(rhs)
@@ -1096,13 +1336,16 @@ impl Parser {
                     let operator = self.current().to_owned();
                     self.advance();
 
+                    let operand = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                        unary
+                    } else {
+                        self.parse_index(source_map)
+                    };
+
                     Expr::Prefix {
+                        span: Span::new(operator.span().start(), operand.span().end(), operand.span().source_id()),
                         operator: Operation::Custom(operator),
-                        operand: Box::new(if let Some(unary) = self.parse_builtin_unary(source_map) {
-                            unary
-                        } else {
-                            self.parse_index(source_map)
-                        })
+                        operand: Box::new(operand)
                     }
                 }
             }
@@ -1124,28 +1367,35 @@ impl Parser {
                 let operator = self.current().to_owned();
                 self.advance();
 
+                let operand = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                    unary
+                } else {
+                    self.parse_index(source_map)
+                };
+
                 Expr::Prefix {
+                    span: Span::new(operator.span().start(), operand.span().end(), operand.span().source_id()),
                     operator: Operation::Ident(operator.try_into().unwrap()),
-                    operand: Box::new(if let Some(unary) = self.parse_builtin_unary(source_map) {
-                        unary
-                    } else {
-                        self.parse_index(source_map)
-                    })
+                    operand: Box::new(operand)
                 }
             }
 
             // operator literal as prefix operation
             TokenKind::Backtick => {
+                let span_start = self.current().span().start();
                 self.advance();
 
-                if let Ok(name) = self.parse_operator_literal(source_map, "1") {
+                if let Ok(name) = self.parse_operator_literal() {
+                    let operand = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                        unary
+                    } else {
+                        self.parse_index(source_map)
+                    };
+                    
                     Expr::Prefix {
+                        span: Span::new(span_start, operand.span().end(), operand.span().source_id()),
                         operator: Operation::OpLit(name),
-                        operand: Box::new(if let Some(unary) = self.parse_builtin_unary(source_map) {
-                            unary
-                        } else {
-                            self.parse_index(source_map)
-                        })
+                        operand: Box::new(operand)
                     }
                 } else {
                     todo!("after error with backtick")
@@ -1165,7 +1415,7 @@ impl Parser {
         }
     }
 
-    fn parse_operator_literal(&mut self, source_map: &SourceMap, req_arity: &str) -> Result<Token, ()> {
+    fn parse_operator_literal(&mut self) -> Result<Token, ()> {
         if let TokenKind::Ident = self.current_kind() {
             let name = self.current().to_owned();
             self.advance();
@@ -1179,12 +1429,27 @@ impl Parser {
 
     /// Attempts to parse a built-in unary expression. If it succeeds, it outputs the expression. If it cannot find a built-in unary operator, it returns None.
     fn parse_builtin_unary(&mut self, source_map: &SourceMap) -> Option<Expr> {
-        if self.accept_op(source_map, "+") {
-            Some(Expr::UnaryPlus(Box::new(self.parse_index(source_map))))
-        } else if self.accept_op(source_map, "-") {
-            Some(Expr::Neg(Box::new(self.parse_index(source_map))))
-        } else if self.accept_op(source_map, "...") {
-            Some(Expr::Spread(Box::new(self.parse_index(source_map))))
+        if let Some(plus) = self.take_op(source_map, "+") {
+            let expr = self.parse_index(source_map);
+
+            Some(Expr::UnaryPlus {
+                span: Span::new(plus.span().start(), expr.span().end(), expr.span().source_id()),
+                expr: Box::new(expr),
+            })
+        } else if let Some(neg) = self.take_op(source_map, "-") {
+            let expr = self.parse_index(source_map);
+
+            Some(Expr::Neg {
+                span: Span::new(neg.span().start(), expr.span().end(), expr.span().source_id()),
+                expr: Box::new(expr)
+            })
+        } else if let Some(spread) = self.take_op(source_map, "...") {
+            let expr = self.parse_index(source_map);
+
+            Some(Expr::Spread {
+                span: Span::new(spread.span().start(), expr.span().end(), expr.span().source_id()),
+                expr: Box::new(expr)
+            })
         } else {
             None
         }
@@ -1209,11 +1474,12 @@ impl Parser {
         let mut kwargs = vec![];
         let mut in_kwargs = false;
 
-        if self.accept(TokenKind::RParen) {
+        if let Some(rp) = self.take(TokenKind::RParen) {            
             return Expr::Call {
+                span: Span::new(callee.span().start(), rp.span().end(), rp.span().source_id()),
                 callee: Box::new(callee),
                 args,
-                kwargs
+                kwargs,
             };
         }
 
@@ -1245,16 +1511,71 @@ impl Parser {
                 args.push(self.parse_expr(source_map))
             }
 
-            if self.accept(TokenKind::RParen)
-                || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RParen)) {
-                break
+            if let Some(rp) = self.take(TokenKind::RParen) {                
+                return Expr::Call {
+                    span: Span::new(callee.span().start(), rp.span().end(), rp.span().source_id()),
+                    callee: Box::new(callee),
+                    args,
+                    kwargs
+                }
+            } else if self.expect(TokenKind::Comma) {
+                if let Some(rp) = self.take(TokenKind::RParen) {                    
+                    return Expr::Call {
+                        span: Span::new(callee.span().start(), rp.span().end(), rp.span().source_id()),
+                        callee: Box::new(callee),
+                        args,
+                        kwargs
+                    }
+                }
             }
         }
+    }
 
-        Expr::Call {
-            callee: Box::new(callee),
-            args,
-            kwargs
+    fn parse_grouping(&mut self, source_map: &SourceMap) -> Expr {
+        if self.accept(TokenKind::LParen) {
+            let span_start = self.current().span().start();
+            self.advance();
+
+            if let Some(rp) = self.take(TokenKind::RParen) {
+                Expr::Unit {
+                    span: Span::new(span_start, rp.span().end(), rp.span().source_id())
+                }
+            } else {
+                let mut expr = self.parse_expr(source_map);
+
+                if let Some(rp) = self.take(TokenKind::RParen) {
+                    expr.span_mut().set_end(rp.span().end());
+                    expr
+                } else if self.expect(TokenKind::Comma) {
+                    let mut exprs = vec![expr];
+
+                    if let Some(rp) = self.take(TokenKind::RParen) {
+                        Expr::Tuple {
+                            exprs,
+                            span: Span::new(span_start, rp.span().end(), rp.span().source_id()) 
+                        }
+                    } else {
+                        loop {
+                            exprs.push(self.parse_expr(source_map));
+
+                            if let Some(rp) = self.take(TokenKind::RParen) {
+                                break Expr::Tuple {
+                                    exprs,
+                                    span: Span::new(span_start, rp.span().end(), rp.span().source_id())
+                                }
+                            } else if self.expect(TokenKind::Comma) {
+                                ()
+                            } else {
+                                todo!()
+                            }
+                        }
+                    }
+                } else {
+                    todo!()
+                }
+            }
+        } else {
+            self.parse_primary(source_map)
         }
     }
 
@@ -1262,7 +1583,10 @@ impl Parser {
         match self.current_kind() {
             TokenKind::Int => {
                 let number = self.current().get_lexeme(source_map).replace('_', "");
-                let expr = Expr::Int(Integer::parse(number).unwrap().into());
+                let expr = Expr::Int {
+                    value: Integer::parse(number).unwrap().into(),
+                    span: self.current().span()
+                };
                 self.advance();
 
                 expr
@@ -1295,7 +1619,10 @@ impl Parser {
                     fraction.insert(0, '1');
                 }
 
-                let expr = Expr::Real(Rational::parse(fraction).unwrap().into());
+                let expr = Expr::Real {
+                    value: Rational::parse(fraction).unwrap().into(),
+                    span: self.current().span()
+                };
                 self.advance();
 
                 expr
@@ -1348,7 +1675,10 @@ impl Parser {
                     fraction.push_str(&"0".repeat(int));
                 }
 
-                let expr = Expr::Real(Rational::parse(fraction).unwrap().into());
+                let expr = Expr::Real {
+                    value: Rational::parse(fraction).unwrap().into(),
+                    span: self.current().span()
+                };
                 self.advance();
 
                 expr
@@ -1358,7 +1688,10 @@ impl Parser {
                 let lexeme = self.current().get_lexeme(source_map);
 
                 if lexeme == "i" {
-                    let expr = Expr::Imag(Rational::ONE.to_owned());
+                    let expr = Expr::Imag {
+                        value: Rational::ONE.to_owned(),
+                        span: self.current().span()
+                    };
                     self.advance();
 
                     expr
@@ -1389,7 +1722,10 @@ impl Parser {
                         fraction.insert(0, '1');
                     }
 
-                    let expr = Expr::Imag(Rational::parse(fraction).unwrap().into());
+                    let expr = Expr::Imag {
+                        value: Rational::parse(fraction).unwrap().into(),
+                        span: self.current().span()
+                    };
                     self.advance();
 
                     expr
@@ -1404,6 +1740,8 @@ impl Parser {
             }
 
             TokenKind::StringStart => {
+                let span_start = self.current().span().start();
+                let span_end;
                 self.advance();
 
                 let src = source_map
@@ -1419,6 +1757,7 @@ impl Parser {
                     match token.kind() {
                         TokenKind::StringSegment => {
                             cur_text.push_str(slice);
+
                             self.advance();
                         }
 
@@ -1435,6 +1774,7 @@ impl Parser {
                                 "\\v"  => '\x0b',
                                 _ => unreachable!()
                             });
+
                             self.advance();
                         }
 
@@ -1444,8 +1784,8 @@ impl Parser {
                                 cur_text = String::new();
                             }
                             
-                            self.advance();
                             parts.push(StringPart::Expr(self.parse_expr(source_map)));
+                            self.advance();
                         }
 
                         TokenKind::InterpolateEnd => {
@@ -1455,9 +1795,9 @@ impl Parser {
                         TokenKind::StringEnd => {
                             if !cur_text.is_empty() {
                                 parts.push(StringPart::Text(cur_text));
-                                cur_text = String::new();
                             }
 
+                            span_end = self.current().span().end();
                             self.advance();
                             break
                         }
@@ -1468,66 +1808,35 @@ impl Parser {
                     }
                 }
 
-                Expr::String(parts)
-            }
-
-            TokenKind::LParen => {
-                self.advance();
-
-                if self.accept(TokenKind::RParen) {
-                    Expr::Unit
-                } else {
-                    let expr = self.parse_expr(source_map);
-
-                    if self.accept(TokenKind::RParen) {
-                        expr
-                    } else if self.expect(TokenKind::Comma) {
-                        let mut exprs = vec![expr];
-
-                        if self.accept(TokenKind::RParen) {
-                            Expr::Tuple(exprs)
-                        } else {
-                            loop {
-                                exprs.push(self.parse_expr(source_map));
-
-                                if self.accept(TokenKind::RParen) {
-                                    break Expr::Tuple(exprs)
-                                } else if self.expect(TokenKind::Comma) {
-                                    ()
-                                } else {
-                                    todo!()
-                                }
-                            }
-                        }
-                    } else {
-                        todo!()
-                    }
-                } 
+                Expr::String {
+                    parts,
+                    span: Span::new(span_start, span_end, self.current().span().source_id())
+                }
             }
 
             TokenKind::Let => {
-                let Stmt::Expr(let_in) = self.parse_let(source_map, true)
+                let Stmt::Expr { expr: let_in, .. } = self.parse_let(source_map, true)
                 else { todo!() };
 
                 let_in
             }
 
             TokenKind::Var => {
-                let Stmt::Expr(var_in) = self.parse_var(source_map, true)
+                let Stmt::Expr { expr: var_in, .. } = self.parse_var(source_map, true)
                 else { todo!() };
 
                 var_in
             }
 
             TokenKind::Const => {
-                let Stmt::Expr(const_in) = self.parse_const(source_map, true)
+                let Stmt::Expr { expr: const_in, .. } = self.parse_const(source_map, true)
                 else { todo!() };
 
                 const_in
             }
 
             TokenKind::Fn => {
-                let Stmt::Expr(fn_in) = self.parse_fn(source_map, true)
+                let Stmt::Expr { expr: fn_in, .. } = self.parse_fn(source_map, true)
                 else { todo!() };
 
                 fn_in
@@ -1569,8 +1878,6 @@ impl Parser {
             
             Some(token)
         } else {
-            println!("expected {kind:?} found {:?}", self.current_kind());
-            self.error(self.current());
             None
         }
     }
@@ -1613,8 +1920,8 @@ impl Parser {
         if let Some(token) = self.take(kind) {
             Some(token)
         } else {
-            // println!("expected {kind:?} found {:?}", self.current_kind());
-            // self.error(*self.current());
+            println!("expected {kind:?} found {:?}", self.current_kind());
+            self.error(self.current());
             None
         }
     }
@@ -1623,6 +1930,7 @@ impl Parser {
         if let Some(token) = self.take_op(source_map, op) {
             Some(token)
         } else {
+            println!("expected {op:?} found {:?}", self.current_kind());
             self.error(self.current());
             None
         }

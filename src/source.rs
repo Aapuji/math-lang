@@ -82,13 +82,15 @@ impl Source {
 
 /// A map between source indices and the actual source material. It is intended that the program will have one SourceMap. When a source is needed to be resolved, the "global" source map can be passed.
 /// 
-/// Main source is always given a source id of 0.
+/// A source id of 0 refers to a synthesized source, meaning that it doesn't come from any actual source file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceMap {
     sources: Vec<Source>
 }
 
 impl SourceMap {
+    pub const SYNTHETIC_SOURCE_ID: SourceId = 0;
+
     pub const fn new() -> Self {
         Self {
             sources: vec![]
@@ -97,15 +99,19 @@ impl SourceMap {
 
     pub fn add_source(&mut self, source: Source) -> SourceId {
         self.sources.push(source);
-        self.sources.len() - 1
+        self.sources.len()
     }
 
     pub fn get_source(&self, id: SourceId) -> &Source {
-        &self.sources[id]
+        &self.sources[id - 1]
     }
 
     pub fn get_source_mut(&mut self, id: SourceId) -> &mut Source {
-        &mut self.sources[id]
+        &mut self.sources[id - 1]
+    }
+
+    pub fn synthetic_span() -> Span {
+        Span::new(0, 0, Self::SYNTHETIC_SOURCE_ID)
     }
 }
 

@@ -1,1 +1,1 @@
-let x = .. in x;
+let f<T>(x: T; y): T := print(x);

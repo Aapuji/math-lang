@@ -4,180 +4,368 @@ use crate::{source::{SourceMap, Span}, token::{Token, TokenKind}};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
-    Let(Let),
+    Let {
+        def: Let,
+        span: Span
+    },
     Var {
         name: Var,
         ty: Option<Type>,
-        value: Option<Expr>
+        value: Option<Expr>,
+        span: Span
     },
     Const {
         name: Var,
         ty: Option<Type>,
-        value: Option<Expr>
+        value: Option<Expr>,
+        span: Span
     },
     Fn {
         header: FnHeader,
-        value: Expr
+        value: Expr,
+        span: Span
     },
     Enum {
         name: Var,
         ty_args: Vec<Generic>,
-        variants: Vec<Variant>
+        variants: Vec<Variant>,
+        span: Span
     },
     Struct {
         name: Var,
         ty_args: Vec<Generic>,
-        fields: Vec<(Var, Type)>
+        fields: Vec<(Var, Type)>,
+        span: Span
     },
-    Expr(Expr),
+    Expr {
+        expr: Expr,
+        span: Span
+    }
+}
+
+impl Stmt {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Let { span, .. } => *span,
+            Self::Var { span, .. } => *span,
+            Self::Const { span, .. } => *span,
+            Self::Fn { span, .. } => *span,
+            Self::Enum { span, .. } => *span,
+            Self::Struct { span, .. } => *span,
+            Self::Expr { span, .. } => *span,
+        }
+    }
+
+    pub fn span_mut(&mut self) -> &mut Span {
+        match self {
+            Self::Let { span, .. } => &mut *span,
+            Self::Var { span, .. } => &mut *span,
+            Self::Const { span, .. } => &mut *span,
+            Self::Fn { span, .. } => &mut *span,
+            Self::Enum { span, .. } => &mut *span,
+            Self::Struct { span, .. } => &mut *span,
+            Self::Expr { span, .. } => &mut *span,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     Ident(Var),
-    String(Vec<StringPart>),
-    Int(rug::Integer),
-    Real(rug::Rational),
-    Imag(rug::Rational),
+    String {
+        parts: Vec<StringPart>,
+        span: Span
+    },
+    Int {
+        value: rug::Integer,
+        span: Span
+    },
+    Real {
+        value: rug::Rational,
+        span: Span
+    },
+    Imag {
+        value: rug::Rational,
+        span: Span
+    },
     Block {
         stmts: Vec<Stmt>,
-        tail: Option<Box<Expr>>
+        tail: Option<Box<Expr>>,
+        span: Span
     },
     Or {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     Xor {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     And {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
-    Not(Box<Expr>),
+    Not {
+        expr: Box<Expr>,
+        span: Span
+    },
     Eq {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     NotEq {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     Less {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     Greater {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     LessEq {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     GreaterEq {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     In {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
+        span: Span
     },
     Plus {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     Minus {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     PlusMinus {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     MinusPlus {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     Times {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     Divide {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     IntDivide {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     Mod {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     ModClass {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     }, 
     Exp {
         lhs: Box<Expr>,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
     Range {
         lhs: Endpoint,
         rhs: Endpoint,
-        step: RangeStep
+        step: RangeStep,
+        span: Span
     },
     Prefix {
         operator: Operation,
-        operand: Box<Expr>
+        operand: Box<Expr>,
+        span: Span
     },
     Infix {
         lhs: Box<Expr>,
         operator: Operation,
-        rhs: Box<Expr>
+        rhs: Box<Expr>,
+        span: Span
     },
-    UnaryPlus(Box<Expr>),
-    Neg(Box<Expr>),
-    Spread(Box<Expr>),
+    UnaryPlus {
+        expr: Box<Expr>,
+        span: Span
+    },
+    Neg {
+        expr: Box<Expr>,
+        span: Span
+    },
+    Spread {
+        expr: Box<Expr>,
+        span: Span
+    },
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,
-        kwargs: Vec<(Var, Expr)>
+        kwargs: Vec<(Var, Expr)>,
+        span: Span
     },
-    Unit,
-    Tuple(Vec<Expr>),
-    LetIn(Box<Let>, Box<Expr>),
+    Unit {
+        span: Span
+    },
+    Tuple {
+        exprs: Vec<Expr>,
+        span: Span
+    },
+    LetIn {
+        def: Box<Let>,
+        expr: Box<Expr>,
+        span: Span
+    },
     VarIn {
         name: Var,
         ty: Option<Type>,
         value: Option<Box<Expr>>,
-        expr: Box<Expr>
+        expr: Box<Expr>,
+        span: Span
     },
     ConstIn {
         name: Var,
         ty: Option<Type>,
         value: Option<Box<Expr>>,
-        expr: Box<Expr>
+        expr: Box<Expr>,
+        span: Span
     },
     FnIn {
         header: FnHeader,
         value: Box<Expr>,
-        expr: Box<Expr>
+        expr: Box<Expr>,
+        span: Span
     }
 }
 
 impl Expr {
     pub fn is_comparison_node(&self) -> Option<(&Box<Expr>, &Box<Expr>)> {
         match self {
-            Expr::Eq { lhs, rhs }        |
-            Expr::NotEq { lhs, rhs }     |
-            Expr::Less { lhs, rhs }      |
-            Expr::Greater { lhs, rhs }   |
-            Expr::LessEq { lhs, rhs }    |
-            Expr::GreaterEq { lhs, rhs } => Some((lhs, rhs)),
+            Expr::Eq { lhs, rhs, span: _ }        |
+            Expr::NotEq { lhs, rhs, span: _ }     |
+            Expr::Less { lhs, rhs, span: _ }      |
+            Expr::Greater { lhs, rhs, span: _ }   |
+            Expr::LessEq { lhs, rhs, span: _ }    |
+            Expr::GreaterEq { lhs, rhs, span: _ } => Some((lhs, rhs)),
             _ => None
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Ident(var) => var.span,
+            Self::String { span, .. } => *span,
+            Self::Int { span, .. } => *span,
+            Self::Real { span, .. } => *span,
+            Self::Imag { span, .. } => *span,
+            Self::Block { span, .. } => *span,
+            Self::Or { span, .. } => *span,
+            Self::Xor { span, .. } => *span,
+            Self::And { span, .. } => *span,
+            Self::Not { span, .. } => *span,
+            Self::Eq { span, .. } => *span,
+            Self::NotEq { span, .. } => *span,
+            Self::Less { span, .. } => *span,
+            Self::Greater { span, .. } => *span,
+            Self::LessEq { span, .. } => *span,
+            Self::GreaterEq { span, .. } => *span,
+            Self::In { span, .. } => *span,
+            Self::Plus { span, .. } => *span,
+            Self::Minus { span, .. } => *span,
+            Self::PlusMinus { span, .. } => *span,
+            Self::MinusPlus { span, .. } => *span,
+            Self::Times { span, .. } => *span,
+            Self::Divide { span, .. } => *span,
+            Self::IntDivide { span, .. } => *span,
+            Self::Mod { span, .. } => *span,
+            Self::ModClass { span, .. } => *span,
+            Self::Exp { span, .. } => *span,
+            Self::Range { span, .. } => *span,
+            Self::Prefix { span, .. } => *span,
+            Self::Infix { span, .. } => *span,
+            Self::UnaryPlus { span, .. } => *span,
+            Self::Neg { span, .. } => *span,
+            Self::Spread { span, .. } => *span,
+            Self::Call { span, .. } => *span,
+            Self::Unit { span, .. } => *span,
+            Self::Tuple { span, .. } => *span,
+            Self::LetIn { span, .. } => *span,
+            Self::VarIn { span, .. } => *span,
+            Self::ConstIn { span, .. } => *span,
+            Self::FnIn { span, .. } => *span,
+        }
+    }
+
+        pub fn span_mut(&mut self) -> &mut Span {
+        match self {
+            Self::Ident(var) => &mut var.span,
+            Self::String { span, .. } => &mut *span,
+            Self::Int { span, .. } => &mut *span,
+            Self::Real { span, .. } => &mut *span,
+            Self::Imag { span, .. } => &mut *span,
+            Self::Block { span, .. } => &mut *span,
+            Self::Or { span, .. } => &mut *span,
+            Self::Xor { span, .. } => &mut *span,
+            Self::And { span, .. } => &mut *span,
+            Self::Not { span, .. } => &mut *span,
+            Self::Eq { span, .. } => &mut *span,
+            Self::NotEq { span, .. } => &mut *span,
+            Self::Less { span, .. } => &mut *span,
+            Self::Greater { span, .. } => &mut *span,
+            Self::LessEq { span, .. } => &mut *span,
+            Self::GreaterEq { span, .. } => &mut *span,
+            Self::In { span, .. } => &mut *span,
+            Self::Plus { span, .. } => &mut *span,
+            Self::Minus { span, .. } => &mut *span,
+            Self::PlusMinus { span, .. } => &mut *span,
+            Self::MinusPlus { span, .. } => &mut *span,
+            Self::Times { span, .. } => &mut *span,
+            Self::Divide { span, .. } => &mut *span,
+            Self::IntDivide { span, .. } => &mut *span,
+            Self::Mod { span, .. } => &mut *span,
+            Self::ModClass { span, .. } => &mut *span,
+            Self::Exp { span, .. } => &mut *span,
+            Self::Range { span, .. } => &mut *span,
+            Self::Prefix { span, .. } => &mut *span,
+            Self::Infix { span, .. } => &mut *span,
+            Self::UnaryPlus { span, .. } => &mut *span,
+            Self::Neg { span, .. } => &mut *span,
+            Self::Spread { span, .. } => &mut *span,
+            Self::Call { span, .. } => &mut *span,
+            Self::Unit { span, .. } => &mut *span,
+            Self::Tuple { span, .. } => &mut *span,
+            Self::LetIn { span, .. } => &mut *span,
+            Self::VarIn { span, .. } => &mut *span,
+            Self::ConstIn { span, .. } => &mut *span,
+            Self::FnIn { span, .. } => &mut *span,
         }
     }
 }
@@ -202,6 +390,10 @@ impl Var {
 
     pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str {
         self.span.get_lexeme(source_map)
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -239,7 +431,8 @@ pub enum LetKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Binding {
     Name(Var, Option<Type>),
-    Call(FnHeader),
+    Fn(FnHeader),   // when it is known that it is a function binding
+    Call(FnHeader), // when it is unknown whether it is a function or constructor binding
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -248,12 +441,24 @@ pub struct FnHeader {
     ty_args: Vec<Generic>,
     args: Vec<(Var, Option<Type>)>,
     kwargs: Vec<(Var, Option<Type>)>,
-    ty: Option<Type>
+    ty: Option<Type>,
+    span: Span
 }
 
 impl FnHeader {
-    pub fn new(name: Var, ty_args: Vec<Generic>, args: Vec<(Var, Option<Type>)>, kwargs: Vec<(Var, Option<Type>)>, ty: Option<Type>) -> Self {
-        Self { name, ty_args, args, kwargs, ty }
+    pub fn new(
+        name: Var, 
+        ty_args: Vec<Generic>, 
+        args: Vec<(Var, Option<Type>)>, 
+        kwargs: Vec<(Var, Option<Type>)>, 
+        ty: Option<Type>, 
+        span: Span
+    ) -> Self {
+        Self { name, ty_args, args, kwargs, ty, span }
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -261,6 +466,14 @@ impl FnHeader {
 pub enum Type {
     Named(Var),
     // more
+}
+
+impl Type {
+    pub fn span(&self) -> Span {
+        match self {
+            Type::Named(var) => var.span
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
