@@ -1305,7 +1305,7 @@ range_span),
                     } else {
                         todo!("after error with backtick")
                     }
-                } else if self.current().can_be_operator(source_map) && !self.current().is_builtin_operator(source_map) {
+                } else if self.current().can_be_operator() && !self.current().is_builtin_operator(source_map) {
                     let operator = self.current().to_owned();
                     self.advance();
 

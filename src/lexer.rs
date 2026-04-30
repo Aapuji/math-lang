@@ -151,14 +151,14 @@ impl<'t> Lexer<'t> {
                         TokenKind::At,
                         Span::new(i, i + 1, self.source)));
                     self.next();
-                } else if ch == '@' && matches!(self.text.peek(), Some(&(_, '@'))) {
+                } else if ch == ':' && matches!(self.text.peek(), Some(&(_, '='))) {
                     self.next();
 
                     if matches!(self.text.peek(), Some(&(_, c)) if OPERATOR_CHARSET.contains(c)) {
                         self.lex_operator((i, ch), &mut tokens);
                     } else {
                         tokens.push(Token::new(
-                            TokenKind::DblAt,
+                            TokenKind::ColonEq,
                             Span::new(i, i + 2, self.source)));
                         self.next();
                     }
@@ -608,10 +608,11 @@ impl<'t> Lexer<'t> {
                 "const" => tokens.push(Token::new(TokenKind::Const, span)),
                 "fn" => tokens.push(Token::new(TokenKind::Fn, span)),
                 "sym" => tokens.push(Token::new(TokenKind::Sym, span)),
+                "context" => tokens.push(Token::new(TokenKind::Context, span)),
                 "enum" => tokens.push(Token::new(TokenKind::Enum, span)),
                 "struct" => tokens.push(Token::new(TokenKind::Struct, span)),
+                "type" => tokens.push(Token::new(TokenKind::Type, span)),
                 "macro" => tokens.push(Token::new(TokenKind::Macro, span)),
-                "decor" => tokens.push(Token::new(TokenKind::Decor, span)),
                 "alias" => tokens.push(Token::new(TokenKind::Alias, span)),
                 "for" => tokens.push(Token::new(TokenKind::For, span)),
                 "while" => tokens.push(Token::new(TokenKind::While, span)),
@@ -626,13 +627,13 @@ impl<'t> Lexer<'t> {
                 "xor" => tokens.push(Token::new(TokenKind::Xor, span)),
                 "not" => tokens.push(Token::new(TokenKind::Not, span)),
                 "as" => tokens.push(Token::new(TokenKind::As, span)),
+                // TODO: Need to also lex some specially allowed math tokens, like ∈ as identifiers.
                 "∈" => tokens.push(Token::new(TokenKind::SlashIn, span)),
                 "∉" => tokens.push(Token::new(TokenKind::SlashNotIn, span)),
                 _ => tokens.push(Token::new(TokenKind::Ident, span))
             }
         } else {
             match &text[start..end] {
-                // TODO: Need to also lex some specially allowed math tokens, like ∈ as identifiers.
                 "in" => tokens.push(Token::new(TokenKind::SlashIn, span)),
                 "notin" => tokens.push(Token::new(TokenKind::SlashNotIn, span)),
                 _ => tokens.push(Token::new(TokenKind::Ident, span)),

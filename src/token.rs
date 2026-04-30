@@ -17,8 +17,9 @@ pub enum TokenKind {
     Operator, // any operator
     
     Eq,
+    ColonEq,
+
     At,
-    DblAt,
     Backtick,
     Underscore,
 
@@ -32,8 +33,8 @@ pub enum TokenKind {
     Semicolon,
 
     // Keywords
-    Let, Var, Const, Fn, Sym, Enum, Struct, 
-    Macro, Decor, Alias,
+    Let, Var, Const, Fn, Sym, Context, Enum, Struct, Type,
+    Macro, Alias,
     For, While, If, Else, Match, When, Using, In,
     And, Or, Xor, Not, As,
     SlashIn, SlashNotIn,
@@ -53,10 +54,11 @@ impl TokenKind {
             Const      |
             Fn         |
             Sym        |
+            Context    |
             Enum       |
             Struct     |
+            Type       |
             Macro      |
-            Decor      |
             Alias      | 
             For        |
             While      |
@@ -107,7 +109,7 @@ impl Token {
         }
     }
 
-    pub fn can_be_operator(&self, source_map: &SourceMap) -> bool {
+    pub fn can_be_operator(&self) -> bool {
         match self.kind {
             TokenKind::Operator   |
             TokenKind::Or         |
