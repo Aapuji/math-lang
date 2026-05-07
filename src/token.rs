@@ -174,4 +174,4 @@ impl Token {
     }
 }
 
-pub const OPERATOR_CHARSET: &'static str = "=:+-*/^.%<>!&|~$?@\\";
+pub const OPERATOR_CHARSET: &'static str = "=:+-*/^.%<>!&|~$?@";

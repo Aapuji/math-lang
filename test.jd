@@ -1,1 +1,3 @@
-#(Hello world)
+sym Pi: Real;
+
+sym LambertW(x: Complex, br: Real);

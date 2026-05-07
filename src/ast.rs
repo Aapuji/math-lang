@@ -25,6 +25,12 @@ pub enum Stmt {
         value: Expr,
         span: Span
     },
+    Sym {
+        name: Var,
+        args: Vec<(Var, Option<Type>)>,
+        ty: Option<Type>,
+        span: Span
+    },
     Enum {
         name: Var,
         ty_args: Vec<Generic>,
@@ -50,6 +56,7 @@ impl Stmt {
             Self::Var { span, .. } => *span,
             Self::Const { span, .. } => *span,
             Self::Fn { span, .. } => *span,
+            Self::Sym { span, .. } => *span, 
             Self::Enum { span, .. } => *span,
             Self::Struct { span, .. } => *span,
             Self::Expr { span, .. } => *span,
@@ -62,6 +69,7 @@ impl Stmt {
             Self::Var { span, .. } => &mut *span,
             Self::Const { span, .. } => &mut *span,
             Self::Fn { span, .. } => &mut *span,
+            Self::Sym { span, .. } => &mut *span,
             Self::Enum { span, .. } => &mut *span,
             Self::Struct { span, .. } => &mut *span,
             Self::Expr { span, .. } => &mut *span,

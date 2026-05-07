@@ -61,9 +61,9 @@ impl Parser {
             | TokenKind::Var
             | TokenKind::Const
             | TokenKind::Fn
+            | TokenKind::Sym
             | TokenKind::Enum
             | TokenKind::Struct
-            | TokenKind::Sym
             | TokenKind::Alias
             | TokenKind::Using
         )
@@ -75,6 +75,7 @@ impl Parser {
             TokenKind::Var => self.parse_var(source_map, false),
             TokenKind::Const => self.parse_const(source_map, false),
             TokenKind::Fn => self.parse_fn(source_map, false),
+            TokenKind::Sym => self.parse_sym(source_map),
             TokenKind::Enum => self.parse_enum(source_map), // TODO: determine if we should have `in` for enum & struct
             TokenKind::Struct => self.parse_struct(source_map),
             _ => todo!()
@@ -361,6 +362,7 @@ impl Parser {
         )
     }
 
+    /// Parses an args definition, meaning args, kwargs, and any type annotations for them. It returns args, kwargs, and the span end of the whole definition.
     fn parse_args_def(&mut self, source_map: &SourceMap) -> (Vec<(Var, Option<Type>)>, Vec<(Var, Option<Type>)>, usize) {
         let mut args = vec![];
         let mut kwargs = vec![];
@@ -422,6 +424,38 @@ impl Parser {
         }
     }
 
+    fn parse_sym(&mut self, source_map: &SourceMap) -> Stmt {
+        let span_start = self.current().span().start();
+        self.accept(TokenKind::Sym);
+
+        let Some(name) = self.require(TokenKind::Ident)
+        else { todo!("expected identifier") };
+        let name = name.try_into().unwrap();
+
+        let mut args = if let TokenKind::LParen = self.current_kind() {
+            let (args, kwargs, _) = self.parse_args_def(source_map);
+            if !kwargs.is_empty() {
+                todo!("keyword arguments are not allowed in a symbolic node definition");
+            }
+
+            args
+        } else {
+            vec![]
+        };
+
+        let ty = self.parse_type_annotation(source_map);
+
+        let Some(semi) = self.require(TokenKind::Semicolon)
+        else { todo!("expected semicolon") };
+
+        Stmt::Sym {
+            name,
+            args,
+            ty,
+            span: Span::new(span_start, semi.span().end(), semi.span().source_id())
+        }
+    }
+
     fn parse_enum(&mut self, source_map: &SourceMap) -> Stmt {
         let span_start = self.current().span().start();
         self.accept(TokenKind::Enum);
@@ -444,11 +478,11 @@ impl Parser {
 
         let mut variants = vec![];
         loop {
-            let Some(name) = self.require(TokenKind::Ident)
+            let Some(tag) = self.require(TokenKind::Ident)
             else { todo!("expected ident") };
-            let name: Var = name.try_into().unwrap();
+            let tag: Var = tag.try_into().unwrap();
 
-            println!("HERE NOW: {:?}, name is {:?}", self.current(), name.get_lexeme(source_map));
+            println!("HERE NOW: {:?}, tag is {:?}", self.current(), tag.get_lexeme(source_map));
 
             if self.accept(TokenKind::LParen) {
                 if self.accept(TokenKind::RParen) {
@@ -490,7 +524,7 @@ impl Parser {
 
                 variants.push(Variant::Record(entries));
             } else {
-                variants.push(Variant::Const(name));
+                variants.push(Variant::Const(tag));
             }
             
             if let Some(rb) = self.take(TokenKind::RBrace) {
@@ -1459,7 +1493,7 @@ range_span),
     }
 
     fn parse_call(&mut self, source_map: &SourceMap) -> Expr {
-        let expr = self.parse_primary(source_map);
+        let expr = self.parse_grouping(source_map);
 
         if self.accept(TokenKind::LParen) {
             self.finish_call(source_map, expr)
@@ -1531,18 +1565,19 @@ range_span),
     }
 
     fn parse_grouping(&mut self, source_map: &SourceMap) -> Expr {
-        if self.accept(TokenKind::LParen) {
-            let span_start = self.current().span().start();
-            self.advance();
+        if let Some(lp) = self.take(TokenKind::LParen) {
+            let span_start = lp.span().start();
 
             if let Some(rp) = self.take(TokenKind::RParen) {
                 Expr::Unit {
                     span: Span::new(span_start, rp.span().end(), rp.span().source_id())
                 }
             } else {
+                println!("HERE: {:?}", self.current());
                 let mut expr = self.parse_expr(source_map);
 
                 if let Some(rp) = self.take(TokenKind::RParen) {
+                    expr.span_mut().set_start(span_start);
                     expr.span_mut().set_end(rp.span().end());
                     expr
                 } else if self.expect(TokenKind::Comma) {
