@@ -1,3 +1,1 @@
-sym Pi: Real;
-
-sym LambertW(x: Complex, br: Real);
+let I2 = [1, 0; 0, 1];

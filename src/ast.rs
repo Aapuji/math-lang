@@ -96,6 +96,10 @@ pub enum Expr {
         value: rug::Rational,
         span: Span
     },
+    Array {
+        rows: Vec<Vec<Expr>>,
+        span: Span
+    },
     Block {
         stmts: Vec<Stmt>,
         tail: Option<Box<Expr>>,
@@ -294,6 +298,7 @@ impl Expr {
             Self::Int { span, .. } => *span,
             Self::Real { span, .. } => *span,
             Self::Imag { span, .. } => *span,
+            Self::Array { span, .. } => *span,
             Self::Block { span, .. } => *span,
             Self::Or { span, .. } => *span,
             Self::Xor { span, .. } => *span,
@@ -339,6 +344,7 @@ impl Expr {
             Self::Int { span, .. } => &mut *span,
             Self::Real { span, .. } => &mut *span,
             Self::Imag { span, .. } => &mut *span,
+            Self::Array { span, .. } => &mut *span,
             Self::Block { span, .. } => &mut *span,
             Self::Or { span, .. } => &mut *span,
             Self::Xor { span, .. } => &mut *span,

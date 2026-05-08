@@ -1497,7 +1497,8 @@ range_span),
 
         if self.accept(TokenKind::LParen) {
             self.finish_call(source_map, expr)
-        } else { // TODO: ident . smth
+        } else { // TODO: indexing via a[b] and dot access via a.b
+                 // Both must be in this function because they must be same precedence as each other
             expr
         }
     }
@@ -1609,7 +1610,41 @@ range_span),
                 }
             }
         } else {
-            self.parse_primary(source_map)
+            self.parse_def_in(source_map)
+        }
+    }
+
+    fn parse_def_in(&mut self, source_map: &SourceMap) -> Expr {
+        match self.current_kind() {
+            TokenKind::Let => {
+                let Stmt::Expr { expr: let_in, .. } = self.parse_let(source_map, true)
+                else { todo!() };
+
+                let_in
+            }
+
+            TokenKind::Var => {
+                let Stmt::Expr { expr: var_in, .. } = self.parse_var(source_map, true)
+                else { todo!() };
+
+                var_in
+            }
+
+            TokenKind::Const => {
+                let Stmt::Expr { expr: const_in, .. } = self.parse_const(source_map, true)
+                else { todo!() };
+
+                const_in
+            }
+
+            TokenKind::Fn => {
+                let Stmt::Expr { expr: fn_in, .. } = self.parse_fn(source_map, true)
+                else { todo!() };
+
+                fn_in
+            }
+
+            _ => self.parse_primary(source_map)
         }
     }
 
@@ -1848,35 +1883,58 @@ range_span),
                 }
             }
 
-            TokenKind::Let => {
-                let Stmt::Expr { expr: let_in, .. } = self.parse_let(source_map, true)
-                else { todo!() };
+            TokenKind::LBracket => {
+                let span_start = self.current().span().start();
+                self.advance();
 
-                let_in
+                if let Some(rb) = self.take(TokenKind::RBracket) {
+                    Expr::Array {
+                        rows: vec![],
+                        span: Span::new(span_start, rb.span().end(), rb.span().source_id())
+                    }
+                } else {
+                    let mut rows = vec![];
+                    let mut row = vec![];
+
+                    loop {
+                        row.push(self.parse_expr(source_map));
+
+                        if let Some(rb) = self.take(TokenKind::RBracket) {
+                            rows.push(row);
+                            
+                            break Expr::Array {
+                                rows,
+                                span: Span::new(span_start, rb.span().end(), rb.span().source_id())
+                            }
+                        } else if self.accept(TokenKind::Comma) {
+                            if let Some(rb) = self.take(TokenKind::RBracket) {
+                                rows.push(row);
+
+                                break Expr::Array {
+                                    rows,
+                                    span: Span::new(span_start, rb.span().end(), rb.span().source_id())
+                                }
+                            }
+                        } else if self.accept(TokenKind::Semicolon) {
+                            rows.push(row);
+                            row = vec![];
+
+                            if let Some(rb) = self.take(TokenKind::RBracket) {
+                                break Expr::Array {
+                                    rows,
+                                    span: Span::new(span_start, rb.span().end(), rb.span().source_id())
+                                }
+                            }
+                        } else {
+                            todo!("expected comma");
+                        }
+                    }
+                }
             }
 
-            TokenKind::Var => {
-                let Stmt::Expr { expr: var_in, .. } = self.parse_var(source_map, true)
-                else { todo!() };
+            // TODO: .
 
-                var_in
-            }
-
-            TokenKind::Const => {
-                let Stmt::Expr { expr: const_in, .. } = self.parse_const(source_map, true)
-                else { todo!() };
-
-                const_in
-            }
-
-            TokenKind::Fn => {
-                let Stmt::Expr { expr: fn_in, .. } = self.parse_fn(source_map, true)
-                else { todo!() };
-
-                fn_in
-            }
-
-            _ => todo!("{:?}", self.current_kind())
+            _ => todo!("unknown primary expression starting at: {:?}", self.current_kind())
         }
     }
 
