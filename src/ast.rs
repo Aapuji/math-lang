@@ -479,15 +479,34 @@ impl FnHeader {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Named(Var),
+    Array {
+        shape: Shape,
+        ty: Box<Type>,
+        span: Span
+    }
     // more
 }
 
 impl Type {
     pub fn span(&self) -> Span {
         match self {
-            Type::Named(var) => var.span
+            Type::Named(var) => var.span,
+            Type::Array { span, .. } => *span
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Shape {
+    Empty,
+    Dynamic,
+    Specified(Vec<ShapeSpec>)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShapeSpec {
+    Known(Expr), // TODO: Perhaps split into KnownValue(Int) and KnownName(Var)
+    Unknown
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

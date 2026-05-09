@@ -122,7 +122,7 @@ impl<'t> Lexer<'t> {
                         Span::new(i, i + 1, self.source)));
                     self.next();
                 } else if ch.is_identifier_start() {
-                    self.lex_ident(false, false, (i, ch), &mut tokens, source_map);
+                    self.lex_ident(false, (i, ch), &mut tokens, source_map);
                 } else if ch == '\\' {
                     match self.text.peek() {
                         Some(&(new_i, ch)) if OPERATOR_CHARSET.contains(ch) => {
@@ -138,7 +138,7 @@ impl<'t> Lexer<'t> {
                         Some(&(new_i, ch)) if ch.is_identifier_continue() => {
                             let start = i;
                             self.next();
-                            self.lex_ident(true, true, (new_i, ch), &mut tokens, source_map);
+                            self.lex_ident(true, (new_i, ch), &mut tokens, source_map);
 
                             let token = tokens.last_mut().unwrap();
                             token.set_span_start(start);
@@ -589,13 +589,13 @@ impl<'t> Lexer<'t> {
 
     // Note: Does not perform any normalization. But, that still must be done to make sure all identifiers are normalized accoridng to NFC (use unicode-normalization crate). Eg. e and aigu-mark should be normalized to e-aigu.
     /// If being called in the middle of an identifier, then `continuing` should be set to true.
-    fn lex_ident(&mut self, after_slash: bool, continuing: bool, ich: (usize, char), tokens: &mut Vec<Token>, source_map: &mut SourceMap) {
+    fn lex_ident(&mut self, after_slash: bool, ich: (usize, char), tokens: &mut Vec<Token>, source_map: &mut SourceMap) {
         let start = ich.0;
         let mut end = start + 1;
 
         loop {
             match self.next() {
-                Some((_, ch)) if if continuing { ch.is_identifier_start() } else { ch.is_identifier_continue() } => {}
+                Some((_, ch)) if ch.is_identifier_continue() => {}
                 Some((i, '\\')) => {
                     match self.text.peek() {
                         Some(&(_, ch)) if ch.is_identifier_continue() => (),

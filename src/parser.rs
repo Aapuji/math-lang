@@ -643,7 +643,72 @@ impl Parser {
     // }
 
     fn parse_type(&mut self, source_map: &SourceMap) -> Type {
-        self.parse_primary_type(source_map)
+        match self.current_kind() {
+            TokenKind::LBracket => self.parse_array_type(source_map),
+            _ => self.parse_primary_type(source_map)
+        }
+    }
+
+    fn parse_array_type(&mut self, source_map: &SourceMap) -> Type {
+        let span_start = self.current().span().start();
+        self.accept(TokenKind::LBracket);
+
+        let shape = if self.accept(TokenKind::RBracket) {
+            Shape::Empty
+        } else if self.accept_op(source_map, "*") {
+            if self.accept(TokenKind::RBracket) {
+                Shape::Dynamic
+            } else {
+                todo!("multirank arrays cannot have dynamic shape")
+            }
+        } else {
+            let mut shape_specs = vec![];
+
+            macro_rules! finish_parsing_item {
+                () => {
+                    if self.accept(TokenKind::RBracket) {
+                        break
+                    } else {
+                        self.expect(TokenKind::Comma);
+
+                        if self.accept(TokenKind::RBracket) {
+                            break
+                        }
+                    }
+                };
+            }
+
+            loop {
+                if self.accept_op(source_map, "?") {
+                    shape_specs.push(ShapeSpec::Unknown);
+
+                    finish_parsing_item!()
+                } else if self.accept_op(source_map, "*") {
+                    todo!("multirank arrays cannot have dynamic shape")
+                } else {
+                    let expr = self.parse_primary(source_map);
+
+                    match expr {
+                        Expr::Ident(_)   |
+                        Expr::Int { .. } => (),
+                        _ => todo!("array shape indicactor can only hold an unknown qualifier ('?'), a whole number, or an identifier")
+                    }
+
+                    shape_specs.push(ShapeSpec::Known(expr));
+                    finish_parsing_item!()
+                }
+            }
+
+            Shape::Specified(shape_specs)
+        };
+
+        let ty = self.parse_type(source_map);
+
+        Type::Array {
+            span: Span::new(span_start, ty.span().end(), ty.span().source_id()),
+            shape,
+            ty: Box::new(ty)
+        }
     }
 
     fn parse_primary_type(&mut self, source_map: &SourceMap) -> Type {
