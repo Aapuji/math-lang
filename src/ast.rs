@@ -504,6 +504,11 @@ pub enum Type {
     Tuple {
         types: Vec<Type>,
         span: Span
+    },
+    Exponent {
+        ty: Box<Type>,
+        exp: Box<Expr>, // must be a Nat
+        span: Span
     }
     // more
 }
@@ -514,7 +519,8 @@ impl Type {
             Type::Unit { span } => *span,
             Type::Named(var) => var.span,
             Type::Array { span, .. } => *span,
-            Type::Tuple { span, .. } => *span
+            Type::Tuple { span, .. } => *span,
+            Type::Exponent { span, .. } => *span
         }
     }
 
@@ -523,7 +529,8 @@ impl Type {
             Type::Unit { span } => &mut *span,
             Type::Named(var) => &mut var.span,
             Type::Array { span, .. } => &mut *span,
-            Type::Tuple { span, .. } => &mut *span
+            Type::Tuple { span, .. } => &mut *span,
+            Type::Exponent { span, .. } => &mut *span
         }
     }
 }

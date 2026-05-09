@@ -1,1 +1,1 @@
-var x: [*][](Int,);
+let f: (Int^2,);

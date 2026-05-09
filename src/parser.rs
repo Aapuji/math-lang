@@ -639,10 +639,40 @@ impl Parser {
     // }
 
     fn parse_type(&mut self, source_map: &SourceMap) -> Type {        
+        self.parse_exponential_type(source_map)
+    }
+
+    fn parse_exponential_type(&mut self, source_map: &SourceMap) -> Type {
+        let ty = self.parse_primary_type(source_map);
+
+        if self.accept_op(source_map, "^") {
+            let exponent = self.parse_primary(source_map);
+
+            if let Expr::Int {..} = exponent {
+                Type::Exponent {
+                    span: Span::new(ty.span().start(), exponent.span().end(), exponent.span().source_id()),
+                    ty: Box::new(ty),
+                    exp: Box::new(exponent)
+                }
+            } else {
+                todo!("type exponential can only contain Natural exponents")
+            }
+        } else {
+            ty
+        }
+    }
+
+    fn parse_primary_type(&mut self, source_map: &SourceMap) -> Type {
         match self.current_kind() {
             TokenKind::LBracket => self.parse_array_type(source_map),
             TokenKind::LParen => self.parse_grouping_type(source_map),
-            _ => self.parse_primary_type(source_map)
+            TokenKind::Ident => {
+                let ty = Type::Named(self.current().try_into().unwrap());
+                self.advance();
+                
+                ty
+            }
+            _ => todo!()
         }
     }
 
@@ -725,21 +755,61 @@ impl Parser {
                 ty
             } else {
                 self.expect(TokenKind::Comma);
+
+                let mut types = if let Type::Exponent { ty: lhs, exp, span: exp_span} = &ty {
+                    if let Expr::Int {  value, .. } = Box::as_ref(exp) {
+                        if value > &Self::MAX_ARGS {
+                            todo!("too high of a type exponent")
+                        } else if value < &0 {
+                            todo!("type exponents must be a natural number")
+                        } else {
+                            let mut types = vec![];
+                            for _ in 0..usize::try_from(value).unwrap() {
+                                let mut lhs = *lhs.to_owned();
+                                *lhs.span_mut() = *exp_span;
+
+                                types.push(lhs);
+                            }
+
+                            types
+                        }
+                    } else {
+                        unreachable!("should be unreachable")
+                    }
+                } else {
+                    vec![ty]
+                };
+
                 if let Some(rp) = self.take(TokenKind::RParen) {
                     return Type::Tuple {
-                        types: vec![ty],
+                        types,
                         span: Span::new(span_start, rp.span().end(), rp.span().source_id())
                     }
                 }
 
-                let mut types = vec![ty];
-
                 loop {
                     let ty = self.parse_type(source_map);
 
-                    // TODO: type exponent
+                    if let Type::Exponent { ty: lhs, exp, span: exp_span } = &ty {
+                        if let Expr::Int {  value, .. } = Box::as_ref(exp) {
+                            if value > &Self::MAX_ARGS {
+                                todo!("too high of a type exponent")
+                            } else if value < &0 {
+                                todo!("type exponents must be a natural number")
+                            } else {
+                                for _ in 0..usize::try_from(value).unwrap() {
+                                    let mut lhs = *lhs.to_owned();
+                                    *lhs.span_mut() = *exp_span;
 
-                    types.push(ty);
+                                    types.push(lhs);
+                                }
+                            }
+                        } else {
+                            unreachable!("should be unreachable")
+                        }
+                    } else {
+                        types.push(ty);
+                    }
 
                     if let Some(rp) = self.take(TokenKind::RParen) {
                         break Type::Tuple {
@@ -758,19 +828,6 @@ impl Parser {
                     }
                 }
             }
-        }
-    }
-
-    fn parse_primary_type(&mut self, source_map: &SourceMap) -> Type {
-        match self.current_kind() {
-            TokenKind::Ident => {
-                let ty = Type::Named(self.current().try_into().unwrap());
-                self.advance();
-                
-                ty
-            }
-
-            _ => todo!()
         }
     }
 
@@ -1636,7 +1693,7 @@ range_span),
         }
 
         loop {
-            if args.len() >= Self::MAX_ARGS {
+            if args.len() > Self::MAX_ARGS {
                 todo!("too many arguments")
             }
 
