@@ -1636,12 +1636,8 @@ range_span),
     fn finish_index(&mut self, source_map: &SourceMap, indexee: Expr) -> Expr {
         let mut args = vec![];
 
-        if let Some(rb) = self.take(TokenKind::RBracket) {
-            return Expr::Index {
-                span: Span::new(indexee.span().start(), rb.span().end(), rb.span().source_id()),
-                indexee: Box::new(indexee),
-                args
-            };
+        if self.accept(TokenKind::RBracket) {
+            todo!("index operation must have at least one argument")
         }
 
         loop {
