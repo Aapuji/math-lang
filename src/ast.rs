@@ -244,6 +244,11 @@ pub enum Expr {
         kwargs: Vec<(Var, Expr)>,
         span: Span
     },
+    Index {
+        indexee: Box<Expr>,
+        args: Vec<Expr>,
+        span: Span
+    },
     Unit {
         span: Span
     },
@@ -328,6 +333,7 @@ impl Expr {
             Self::Neg { span, .. } => *span,
             Self::Spread { span, .. } => *span,
             Self::Call { span, .. } => *span,
+            Self::Index { span, .. } => *span,
             Self::Unit { span, .. } => *span,
             Self::Tuple { span, .. } => *span,
             Self::LetIn { span, .. } => *span,
@@ -374,6 +380,7 @@ impl Expr {
             Self::Neg { span, .. } => &mut *span,
             Self::Spread { span, .. } => &mut *span,
             Self::Call { span, .. } => &mut *span,
+            Self::Index { span, .. } => &mut *span,
             Self::Unit { span, .. } => &mut *span,
             Self::Tuple { span, .. } => &mut *span,
             Self::LetIn { span, .. } => &mut *span,

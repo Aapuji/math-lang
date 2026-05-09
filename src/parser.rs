@@ -1377,7 +1377,7 @@ range_span),
                     let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
                         unary
                     } else {
-                        self.parse_index(source_map)
+                        self.parse_call(source_map)
                     };
 
                     Expr::Infix {
@@ -1391,7 +1391,7 @@ range_span),
                         let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
                             unary
                         } else {
-                            self.parse_index(source_map)
+                            self.parse_call(source_map)
                         };
 
                         Expr::Infix {
@@ -1410,7 +1410,7 @@ range_span),
                     let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
                         unary
                     } else {
-                        self.parse_index(source_map)
+                        self.parse_call(source_map)
                     };
 
                     Expr::Infix {
@@ -1437,7 +1437,7 @@ range_span),
                     let operand = if let Some(unary) = self.parse_builtin_unary(source_map) {
                         unary
                     } else {
-                        self.parse_index(source_map)
+                        self.parse_call(source_map)
                     };
 
                     Expr::Prefix {
@@ -1468,7 +1468,7 @@ range_span),
                 let operand = if let Some(unary) = self.parse_builtin_unary(source_map) {
                     unary
                 } else {
-                    self.parse_index(source_map)
+                    self.parse_call(source_map)
                 };
 
                 Expr::Prefix {
@@ -1487,7 +1487,7 @@ range_span),
                     let operand = if let Some(unary) = self.parse_builtin_unary(source_map) {
                         unary
                     } else {
-                        self.parse_index(source_map)
+                        self.parse_call(source_map)
                     };
                     
                     Expr::Prefix {
@@ -1505,7 +1505,7 @@ range_span),
                 let lhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
                     unary
                 } else {
-                    self.parse_index(source_map)
+                    self.parse_call(source_map)
                 };
 
                 parse_potentially_infix!(lhs)
@@ -1528,21 +1528,21 @@ range_span),
     /// Attempts to parse a built-in unary expression. If it succeeds, it outputs the expression. If it cannot find a built-in unary operator, it returns None.
     fn parse_builtin_unary(&mut self, source_map: &SourceMap) -> Option<Expr> {
         if let Some(plus) = self.take_op(source_map, "+") {
-            let expr = self.parse_index(source_map);
+            let expr = self.parse_call(source_map);
 
             Some(Expr::UnaryPlus {
                 span: Span::new(plus.span().start(), expr.span().end(), expr.span().source_id()),
                 expr: Box::new(expr),
             })
         } else if let Some(neg) = self.take_op(source_map, "-") {
-            let expr = self.parse_index(source_map);
+            let expr = self.parse_call(source_map);
 
             Some(Expr::Neg {
                 span: Span::new(neg.span().start(), expr.span().end(), expr.span().source_id()),
                 expr: Box::new(expr)
             })
         } else if let Some(spread) = self.take_op(source_map, "...") {
-            let expr = self.parse_index(source_map);
+            let expr = self.parse_call(source_map);
 
             Some(Expr::Spread {
                 span: Span::new(spread.span().start(), expr.span().end(), expr.span().source_id()),
@@ -1553,15 +1553,14 @@ range_span),
         }
     }
 
-    fn parse_index(&mut self, source_map: &SourceMap) -> Expr {
-        self.parse_call(source_map)
-    }
-
+    /// Parses function calling, indexing, and dot access.
     fn parse_call(&mut self, source_map: &SourceMap) -> Expr {
         let expr = self.parse_grouping(source_map);
 
         if self.accept(TokenKind::LParen) {
             self.finish_call(source_map, expr)
+        } else if self.accept(TokenKind::LBracket) {
+            self.finish_index(source_map, expr)
         } else { // TODO: indexing via a[b] and dot access via a.b
                  // Both must be in this function because they must be same precedence as each other
             expr
@@ -1624,6 +1623,42 @@ range_span),
                         callee: Box::new(callee),
                         args,
                         kwargs
+                    }
+                }
+            }
+        }
+    }
+
+    fn finish_index(&mut self, source_map: &SourceMap, indexee: Expr) -> Expr {
+        let mut args = vec![];
+
+        if let Some(rb) = self.take(TokenKind::RBracket) {
+            return Expr::Index {
+                span: Span::new(indexee.span().start(), rb.span().end(), rb.span().source_id()),
+                indexee: Box::new(indexee),
+                args
+            };
+        }
+
+        loop {
+            if args.len() > Self::MAX_ARGS {
+                todo!("too many arguments")
+            }
+
+            args.push(self.parse_expr(source_map));
+
+            if let Some(rb) = self.take(TokenKind::RBracket) {                
+                return Expr::Index {
+                    span: Span::new(indexee.span().start(), rb.span().end(), rb.span().source_id()),
+                    indexee: Box::new(indexee),
+                    args,
+                }
+            } else if self.expect(TokenKind::Comma) {
+                if let Some(rb) = self.take(TokenKind::RBracket) {                    
+                    return Expr::Index {
+                        span: Span::new(indexee.span().start(), rb.span().end(), rb.span().source_id()),
+                        indexee: Box::new(indexee),
+                        args,
                     }
                 }
             }
