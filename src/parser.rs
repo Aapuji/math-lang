@@ -3,7 +3,7 @@ use std::vec::IntoIter;
 
 use rug::{Integer, Rational};
 
-use crate::ast::*;
+use crate::{ast::*, source};
 use crate::source::{SourceMap, Span};
 use crate::token::{Token, TokenKind};
 
@@ -133,8 +133,6 @@ impl Parser {
 
         loop {
             bindings.push(self.parse_binding(source_map));
-
-            println!("HERE IN BINDING: {:?}", self.current());
 
             if self.accept(TokenKind::Comma) {
                 continue
@@ -482,8 +480,6 @@ impl Parser {
             else { todo!("expected ident") };
             let tag: Var = tag.try_into().unwrap();
 
-            println!("HERE NOW: {:?}, tag is {:?}", self.current(), tag.get_lexeme(source_map));
-
             if self.accept(TokenKind::LParen) {
                 if self.accept(TokenKind::RParen) {
                     todo!("empty enum tuple variants are not allowed")
@@ -642,9 +638,10 @@ impl Parser {
     //     self.require(TokenKind::Ident).unwrap()
     // }
 
-    fn parse_type(&mut self, source_map: &SourceMap) -> Type {
+    fn parse_type(&mut self, source_map: &SourceMap) -> Type {        
         match self.current_kind() {
             TokenKind::LBracket => self.parse_array_type(source_map),
+            TokenKind::LParen => self.parse_grouping_type(source_map),
             _ => self.parse_primary_type(source_map)
         }
     }
@@ -708,6 +705,59 @@ impl Parser {
             span: Span::new(span_start, ty.span().end(), ty.span().source_id()),
             shape,
             ty: Box::new(ty)
+        }
+    }
+
+    fn parse_grouping_type(&mut self, source_map: &SourceMap) -> Type {
+        let span_start = self.current().span().start();
+        self.accept(TokenKind::LParen);
+
+        if let Some(rp) = self.take(TokenKind::RParen) {
+            Type::Unit {
+                span: Span::new(span_start, rp.span().end(), rp.span().source_id())
+            }
+        } else {
+            let mut ty = self.parse_type(source_map);
+
+            if let Some(rp) = self.take(TokenKind::RParen) {
+                ty.span_mut().set_start(span_start);
+                ty.span_mut().set_end(rp.span().end());
+                ty
+            } else {
+                self.expect(TokenKind::Comma);
+                if let Some(rp) = self.take(TokenKind::RParen) {
+                    return Type::Tuple {
+                        types: vec![ty],
+                        span: Span::new(span_start, rp.span().end(), rp.span().source_id())
+                    }
+                }
+
+                let mut types = vec![ty];
+
+                loop {
+                    let ty = self.parse_type(source_map);
+
+                    // TODO: type exponent
+
+                    types.push(ty);
+
+                    if let Some(rp) = self.take(TokenKind::RParen) {
+                        break Type::Tuple {
+                            types,
+                            span: Span::new(span_start, rp.span().end(), rp.span().source_id())
+                        }
+                    } else {
+                        self.expect(TokenKind::Comma);
+
+                        if let Some(rp) = self.take(TokenKind::RParen) {
+                            break Type::Tuple {
+                                types,
+                                span: Span::new(span_start, rp.span().end(), rp.span().source_id())
+                            }
+                        }    
+                    }
+                }
+            }
         }
     }
 
@@ -1692,7 +1742,6 @@ range_span),
                     span: Span::new(span_start, rp.span().end(), rp.span().source_id())
                 }
             } else {
-                println!("HERE: {:?}", self.current());
                 let mut expr = self.parse_expr(source_map);
 
                 if let Some(rp) = self.take(TokenKind::RParen) {

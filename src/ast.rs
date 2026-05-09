@@ -492,10 +492,17 @@ impl FnHeader {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
+    Unit {
+        span: Span
+    },
     Named(Var),
     Array {
         shape: Shape,
         ty: Box<Type>,
+        span: Span
+    },
+    Tuple {
+        types: Vec<Type>,
         span: Span
     }
     // more
@@ -504,8 +511,19 @@ pub enum Type {
 impl Type {
     pub fn span(&self) -> Span {
         match self {
+            Type::Unit { span } => *span,
             Type::Named(var) => var.span,
-            Type::Array { span, .. } => *span
+            Type::Array { span, .. } => *span,
+            Type::Tuple { span, .. } => *span
+        }
+    }
+
+    pub fn span_mut(&mut self) -> &mut Span {
+        match self {
+            Type::Unit { span } => &mut *span,
+            Type::Named(var) => &mut var.span,
+            Type::Array { span, .. } => &mut *span,
+            Type::Tuple { span, .. } => &mut *span
         }
     }
 }
