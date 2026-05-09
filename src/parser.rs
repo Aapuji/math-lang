@@ -1555,15 +1555,19 @@ range_span),
 
     /// Parses function calling, indexing, and dot access.
     fn parse_call(&mut self, source_map: &SourceMap) -> Expr {
-        let expr = self.parse_grouping(source_map);
+        let mut expr = self.parse_grouping(source_map);
 
-        if self.accept(TokenKind::LParen) {
-            self.finish_call(source_map, expr)
-        } else if self.accept(TokenKind::LBracket) {
-            self.finish_index(source_map, expr)
-        } else { // TODO: indexing via a[b] and dot access via a.b
-                 // Both must be in this function because they must be same precedence as each other
-            expr
+        loop {
+            if self.accept(TokenKind::LParen) {
+                expr = self.finish_call(source_map, expr)
+            } else if self.accept(TokenKind::LBracket) {
+                expr = self.finish_index(source_map, expr)
+            } else if self.current().is_accessor(source_map) {
+                expr = self.finish_access(source_map, expr)
+            } else { // TODO:  dot access via a.b
+                    // Both must be in this function because they must be same precedence as each other
+                break expr
+            }
         }
     }
 
@@ -1662,6 +1666,24 @@ range_span),
                     }
                 }
             }
+        }
+    }
+
+    fn finish_access(&mut self, source_map: &SourceMap, accessee: Expr) -> Expr {
+        if self.accept(TokenKind::Dot) {
+            if let Some(member) = self.take(TokenKind::Ident) {
+                Expr::MemberAccess {
+                    span: Span::new(accessee.span().start(), member.span().end(), member.span().source_id()),
+                    accessee: Box::new(accessee),
+                    member: member.try_into().unwrap()
+                }
+            } else {
+                todo!("expected identifier")
+            }
+        } else if self.accept_op(source_map, ".@") {
+            todo!("dot macro")
+        } else {
+            todo!()
         }
     }
 

@@ -249,6 +249,11 @@ pub enum Expr {
         args: Vec<Expr>,
         span: Span
     },
+    MemberAccess {
+        accessee: Box<Expr>,
+        member: Var,
+        span: Span
+    },
     Unit {
         span: Span
     },
@@ -333,6 +338,7 @@ impl Expr {
             Self::Neg { span, .. } => *span,
             Self::Spread { span, .. } => *span,
             Self::Call { span, .. } => *span,
+            Self::MemberAccess { span, .. } => *span,
             Self::Index { span, .. } => *span,
             Self::Unit { span, .. } => *span,
             Self::Tuple { span, .. } => *span,
@@ -381,6 +387,7 @@ impl Expr {
             Self::Spread { span, .. } => &mut *span,
             Self::Call { span, .. } => &mut *span,
             Self::Index { span, .. } => &mut *span,
+            Self::MemberAccess { span, .. } => &mut *span,
             Self::Unit { span, .. } => &mut *span,
             Self::Tuple { span, .. } => &mut *span,
             Self::LetIn { span, .. } => &mut *span,

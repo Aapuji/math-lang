@@ -153,6 +153,14 @@ impl Token {
         }
     }
 
+    pub fn is_accessor(&self, source_map: &SourceMap) -> bool {
+        match self.get_lexeme(source_map) {
+            "."  |
+            ".@" => true,
+            _ => false
+        }
+    }
+
     pub fn kind(&self) -> TokenKind {
         self.kind
     }
