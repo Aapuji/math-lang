@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .data()
         .to_owned();
 
-    println!("{}\n== TOKENS ==", content);
+    // println!("{}\n== TOKENS ==", content);
 
     let lexer = Lexer::new(&content, main_source);
     let tokens = lexer.lex(&mut source_map);

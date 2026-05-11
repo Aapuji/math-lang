@@ -49,6 +49,11 @@ pub enum Stmt {
         def: Type,
         span: Span
     },
+    Alias {
+        new: AliasItem,
+        old: AliasTarget,
+        span: Span
+    },
     Expr {
         expr: Expr,
         span: Span
@@ -67,6 +72,7 @@ impl Stmt {
             Self::Struct { span, .. } => *span,
             Self::Type { span, .. } => *span,
             Self::Expr { span, .. } => *span,
+            Self::Alias { span, .. } => *span
         }
     }
 
@@ -80,6 +86,7 @@ impl Stmt {
             Self::Enum { span, .. } => &mut *span,
             Self::Struct { span, .. } => &mut *span,
             Self::Type { span, .. } => &mut *span,
+            Self::Alias { span, .. } => &mut *span,
             Self::Expr { span, .. } => &mut *span,
         }
     }
@@ -569,6 +576,41 @@ pub enum Variant {
     Record(Vec<(Var, Type)>)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AliasItem {
+    Ident(Var),
+    Operator(Token)
+}
+
+impl AliasItem {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Ident(name) => name.span(),
+            Self::Operator(op) => op.span()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AliasTarget {
+    Ident(Var),
+    Operator(Token),
+    OpLit(OpLit),
+    Expr(Expr)
+    // TODO: perhaps also Path?
+}
+
+impl AliasTarget {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Ident(name) => name.span(),
+            Self::Operator(op) => op.span(),
+            Self::OpLit(oplit) => oplit.span(), 
+            Self::Expr(expr) => expr.span()
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Endpoint {
     Inclusive(Box<Expr>),
@@ -586,7 +628,23 @@ pub enum RangeStep {
 pub enum Operation {
     Ident(Var),
     Custom(Token),
-    OpLit(Token),
+    OpLit(OpLit),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpLit {
+    name: Var,
+    span: Span
+}
+
+impl OpLit {
+    pub fn new(name: Var, span: Span) -> Self {
+        Self { name, span }
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

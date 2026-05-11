@@ -1,1 +1,1 @@
-type Int2 = (Int^2,);
+alias ++ for \hello;

@@ -65,6 +65,7 @@ impl Parser {
             | TokenKind::Enum
             | TokenKind::Struct
             | TokenKind::Type
+            | TokenKind::Macro
             | TokenKind::Alias
             | TokenKind::Using
         )
@@ -80,6 +81,7 @@ impl Parser {
             TokenKind::Enum => self.parse_enum(source_map), // TODO: determine if we should have `in` for enum & struct
             TokenKind::Struct => self.parse_struct(source_map),
             TokenKind::Type => self.parse_type_def(source_map),
+            TokenKind::Alias => self.parse_alias(source_map),
             _ => todo!()
         }
     }
@@ -622,6 +624,77 @@ impl Parser {
             span: Span::new(span_start, semi.span().end(), semi.span().source_id())
         }
     }
+
+fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
+    let span_start = self.current().span().start();
+    self.accept(TokenKind::Alias);
+
+    let new = match self.current_kind() {
+        TokenKind::Ident => {
+            let name = AliasItem::Ident(self.current().try_into().unwrap());
+            self.advance();
+
+            name
+        }
+
+        TokenKind::Operator => {
+            let op = AliasItem::Operator(self.current());
+            self.advance();
+
+            op
+        }
+
+        _ => todo!("expected identifier or operator")
+    };
+
+    self.expect(TokenKind::For);
+
+    let old = match self.current_kind() {
+        TokenKind::Ident => {
+            let name = AliasTarget::Ident(self.current().try_into().unwrap());
+            self.advance();
+
+            name
+        }
+
+        TokenKind::Operator => {
+            let op = AliasTarget::Operator(self.current());
+            self.advance();
+
+            op
+        }
+
+        TokenKind::Backtick => {
+            let bt = self.current();
+            let operator = self.parse_operator_literal(bt.span().start());
+
+            AliasTarget::OpLit(operator)
+        },
+        TokenKind::LParen => {
+            let lp = self.current();
+            self.advance();
+            
+            let mut expr = self.parse_expr(source_map);
+            let Some(rp) = self.require(TokenKind::RParen)
+            else { todo!("expected ')'") };
+
+            expr.span_mut().set_start(lp.span().start());
+            expr.span_mut().set_end(rp.span().end());
+
+            AliasTarget::Expr(expr)
+        },
+        _ => todo!("expected identifier, operator, operator literal, or expression surrounded with parentheses")
+    };
+
+    let Some(semi) = self.require(TokenKind::Semicolon)
+    else { todo!("expected semicolon") };
+
+    Stmt::Alias {
+        new,
+        old,
+        span: Span::new(span_start, semi.span().end(), semi.span().source_id())
+    }
+}
 
     /// Outputs empty vector if no generic arguments are seen. 
     fn parse_generic(&mut self, source_map: &SourceMap) -> Vec<Generic> {
@@ -1521,22 +1594,19 @@ range_span),
                         operator: Operation::Ident(operator.try_into().unwrap()),
                         rhs: Box::new(rhs)
                     }
-                } else if self.accept(TokenKind::Backtick) {
-                    if let Ok(name) = self.parse_operator_literal() {                        
-                        let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
-                            unary
-                        } else {
-                            self.parse_call(source_map)
-                        };
-
-                        Expr::Infix {
-                            span: Span::new($lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
-                            lhs: Box::new($lhs),
-                            operator: Operation::OpLit(name),
-                            rhs: Box::new(rhs)
-                        }
+                } else if let Some(bt) = self.take(TokenKind::Backtick) {
+                    let operator = self.parse_operator_literal(bt.span().start());                      
+                    let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                        unary
                     } else {
-                        todo!("after error with backtick")
+                        self.parse_call(source_map)
+                    };
+
+                    Expr::Infix {
+                        span: Span::new($lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
+                        lhs: Box::new($lhs),
+                        operator: Operation::OpLit(operator),
+                        rhs: Box::new(rhs)
                     }
                 } else if self.current().can_be_operator() && !self.current().is_builtin_operator(source_map) {
                     let operator = self.current().to_owned();
@@ -1616,22 +1686,20 @@ range_span),
             // operator literal as prefix operation
             TokenKind::Backtick => {
                 let span_start = self.current().span().start();
-                self.advance();
+                let Some(bt) = self.take(TokenKind::Backtick)
+                else { todo!("expected backtick") };
 
-                if let Ok(name) = self.parse_operator_literal() {
-                    let operand = if let Some(unary) = self.parse_builtin_unary(source_map) {
-                        unary
-                    } else {
-                        self.parse_call(source_map)
-                    };
-                    
-                    Expr::Prefix {
-                        span: Span::new(span_start, operand.span().end(), operand.span().source_id()),
-                        operator: Operation::OpLit(name),
-                        operand: Box::new(operand)
-                    }
+                let operator = self.parse_operator_literal(bt.span().start());
+                let operand = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                    unary
                 } else {
-                    todo!("after error with backtick")
+                    self.parse_call(source_map)
+                };
+                
+                Expr::Prefix {
+                    span: Span::new(span_start, operand.span().end(), operand.span().source_id()),
+                    operator: Operation::OpLit(operator),
+                    operand: Box::new(operand)
                 }
             }
 
@@ -1648,13 +1716,13 @@ range_span),
         }
     }
 
-    fn parse_operator_literal(&mut self) -> Result<Token, ()> {
-        if let TokenKind::Ident = self.current_kind() {
-            let name = self.current().to_owned();
-            self.advance();
-            self.expect(TokenKind::Backtick);
+    fn parse_operator_literal(&mut self, span_start: usize) -> OpLit {
+        if let Some(name) = self.take(TokenKind::Ident) {
+            let name = name.try_into().unwrap();
+            let Some(bt) = self.require(TokenKind::Backtick)
+            else { todo!("expected backtick") };
 
-            Ok(name)
+            OpLit::new(name, Span::new(span_start, bt.span().end(),  bt.span().source_id()))
         } else {
             todo!("report error for invalid operator literal")
         }
