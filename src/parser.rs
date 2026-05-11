@@ -64,6 +64,7 @@ impl Parser {
             | TokenKind::Sym
             | TokenKind::Enum
             | TokenKind::Struct
+            | TokenKind::Type
             | TokenKind::Alias
             | TokenKind::Using
         )
@@ -78,6 +79,7 @@ impl Parser {
             TokenKind::Sym => self.parse_sym(source_map),
             TokenKind::Enum => self.parse_enum(source_map), // TODO: determine if we should have `in` for enum & struct
             TokenKind::Struct => self.parse_struct(source_map),
+            TokenKind::Type => self.parse_type_def(source_map),
             _ => todo!()
         }
     }
@@ -592,6 +594,32 @@ impl Parser {
                     }
                 }
             }
+        }
+    }
+
+    fn parse_type_def(&mut self, source_map: &SourceMap) -> Stmt {
+        let span_start = self.current().span().start();
+        self.accept(TokenKind::Type);
+
+        let Some(name) = self.require(TokenKind::Ident)
+        else { todo!("expected identifier") };
+        let name = name.try_into().unwrap();
+
+        let ty_args = self.parse_generic(source_map);
+
+        // TODO: abstract type (abstract type T;), just type (type T;) declarations
+        self.expect(TokenKind::Eq);
+
+        let def = self.parse_type(source_map);
+        
+        let Some(semi) = self.require(TokenKind::Semicolon)
+        else { todo!("expected semicolon") };
+
+        Stmt::Type {
+            name,
+            ty_args,
+            def,
+            span: Span::new(span_start, semi.span().end(), semi.span().source_id())
         }
     }
 

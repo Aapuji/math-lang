@@ -1,1 +1,1 @@
-let f: (Int^2,);
+type Int2 = (Int^2,);

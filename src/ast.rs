@@ -43,6 +43,12 @@ pub enum Stmt {
         fields: Vec<(Var, Type)>,
         span: Span
     },
+    Type {
+        name: Var,
+        ty_args: Vec<Generic>,
+        def: Type,
+        span: Span
+    },
     Expr {
         expr: Expr,
         span: Span
@@ -59,6 +65,7 @@ impl Stmt {
             Self::Sym { span, .. } => *span, 
             Self::Enum { span, .. } => *span,
             Self::Struct { span, .. } => *span,
+            Self::Type { span, .. } => *span,
             Self::Expr { span, .. } => *span,
         }
     }
@@ -72,6 +79,7 @@ impl Stmt {
             Self::Sym { span, .. } => &mut *span,
             Self::Enum { span, .. } => &mut *span,
             Self::Struct { span, .. } => &mut *span,
+            Self::Type { span, .. } => &mut *span,
             Self::Expr { span, .. } => &mut *span,
         }
     }
