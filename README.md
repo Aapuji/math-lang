@@ -14,8 +14,8 @@ sym LambertW(z: Complex) := let w = LambertW(z) in
 let W(z: Complex) = LambertW(z);
 
 # We can add a rewrite rule
-rewrite W($x) + W($y) =>
-  W(x * y * (1/W(x) + 1/W(y));
+rewrite rule W($x) + W($y) =>
+  W(x * y * (1/W(x) + 1/W(y)));
 ```
 ## Doing Probability
 ```
