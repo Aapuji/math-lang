@@ -2,7 +2,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 /// Represents a span of content in some source
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     start: usize,
     end: usize,     // start of next character
@@ -106,9 +106,9 @@ impl SourceMap {
         &self.sources[id - 1]
     }
 
-    pub fn get_source_mut(&mut self, id: SourceId) -> &mut Source {
-        &mut self.sources[id - 1]
-    }
+    // pub fn get_source_mut(&mut self, id: SourceId) -> &mut Source {
+    //     &mut self.sources[id - 1]
+    // }
 
     pub fn synthetic_span() -> Span {
         Span::new(0, 0, Self::SYNTHETIC_SOURCE_ID)

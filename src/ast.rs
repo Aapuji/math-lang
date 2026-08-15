@@ -1,8 +1,9 @@
-use crate::{source::{SourceMap, Span}, token::{Token, TokenKind}};
+use crate::source::{SourceMap, Span};
+use crate::token::{Token, TokenKind, LexemeId};
 
 // TODO: store spans
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Stmt {
     Let {
         def: Let,
@@ -49,11 +50,11 @@ pub enum Stmt {
         def: Type,
         span: Span
     },
-    Alias {
-        new: AliasItem,
-        old: AliasTarget,
-        span: Span
-    },
+    // Alias {
+    //     new: AliasLeft,
+    //     old: AliasRight,
+    //     span: Span
+    // },
     Expr {
         expr: Expr,
         span: Span
@@ -72,7 +73,7 @@ impl Stmt {
             Self::Struct { span, .. } => *span,
             Self::Type { span, .. } => *span,
             Self::Expr { span, .. } => *span,
-            Self::Alias { span, .. } => *span
+            // Self::Alias { span, .. } => *span
         }
     }
 
@@ -86,13 +87,13 @@ impl Stmt {
             Self::Enum { span, .. } => &mut *span,
             Self::Struct { span, .. } => &mut *span,
             Self::Type { span, .. } => &mut *span,
-            Self::Alias { span, .. } => &mut *span,
+            // Self::Alias { span, .. } => &mut *span,
             Self::Expr { span, .. } => &mut *span,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
     Ident(Var),
     String {
@@ -253,6 +254,17 @@ pub enum Expr {
         expr: Box<Expr>,
         span: Span
     },
+    // CApply {
+    //     lhs: Var,
+    //     args: Vec<Expr>,
+    //     kwargs: Vec<(Var, Expr)>,
+    //     span: Span
+    // },
+    // IApply {
+    //     lhs: Var,
+    //     args: Vec<Expr>,
+    //     span: Span
+    // },
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,
@@ -352,6 +364,7 @@ impl Expr {
             Self::UnaryPlus { span, .. } => *span,
             Self::Neg { span, .. } => *span,
             Self::Spread { span, .. } => *span,
+            // Self::Apply { span, .. } => *span,
             Self::Call { span, .. } => *span,
             Self::MemberAccess { span, .. } => *span,
             Self::Index { span, .. } => *span,
@@ -400,6 +413,7 @@ impl Expr {
             Self::UnaryPlus { span, .. } => &mut *span,
             Self::Neg { span, .. } => &mut *span,
             Self::Spread { span, .. } => &mut *span,
+            // Self::Apply { span, .. } => &mut *span,
             Self::Call { span, .. } => &mut *span,
             Self::Index { span, .. } => &mut *span,
             Self::MemberAccess { span, .. } => &mut *span,
@@ -411,23 +425,83 @@ impl Expr {
             Self::FnIn { span, .. } => &mut *span,
         }
     }
+
+    // pub fn creates_scope(&self) -> bool {
+    //     Self::Ident(..) => false,
+    //     Self::String { .. } => true,
+    //     Self::Int { .. } => true,
+    //     Self::Real { .. } => true,
+    //     Self::Imag { .. } => true,
+    //     Self::Array { .. } => true,
+    //     Self::Block { .. } => &mut *span,
+    //     Self::Or { .. } => &mut *span,
+    //     Self::Xor { .. } => &mut *span,
+    //     Self::And { .. } => &mut *span,
+    //     Self::Not { .. } => &mut *span,
+    //     Self::Eq { .. } => &mut *span,
+    //     Self::NotEq { .. } => &mut *span,
+    //     Self::Less { .. } => &mut *span,
+    //     Self::Greater { .. } => &mut *span,
+    //     Self::LessEq { .. } => &mut *span,
+    //     Self::GreaterEq { .. } => &mut *span,
+    //     Self::In { .. } => &mut *span,
+    //     Self::Plus { .. } => &mut *span,
+    //     Self::Minus { .. } => &mut *span,
+    //     Self::PlusMinus { .. } => &mut *span,
+    //     Self::MinusPlus { .. } => &mut *span,
+    //     Self::Times { .. } => &mut *span,
+    //     Self::Divide { .. } => &mut *span,
+    //     Self::IntDivide { .. } => &mut *span,
+    //     Self::Mod { .. } => &mut *span,
+    //     Self::ModClass { .. } => &mut *span,
+    //     Self::Exp { .. } => &mut *span,
+    //     Self::Range { .. } => &mut *span,
+    //     Self::Prefix { .. } => &mut *span,
+    //     Self::Infix { .. } => &mut *span,
+    //     Self::UnaryPlus { .. } => &mut *span,
+    //     Self::Neg { .. } => &mut *span,
+    //     Self::Spread { .. } => &mut *span,
+    //     // Self::Apply { .. } => &mut *span,
+    //     Self::Call { .. } => &mut *span,
+    //     Self::Index { .. } => &mut *span,
+    //     Self::MemberAccess { .. } => &mut *span,
+    //     Self::Unit { .. } => &mut *span,
+    //     Self::Tuple { .. } => &mut *span,
+    //     Self::LetIn { .. } => &mut *span,
+    //     Self::VarIn { .. } => &mut *span,
+    //     Self::ConstIn { .. } => &mut *span,
+    //     Self::FnIn { .. } => &mut *span,
+    // }
 }
 
 // TODO: symbol id
 type SymbolId = usize;
 
-/// Represents a name. `SymbolId` is assigned to 0 until name resolution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Represents a name. 
+/// The `id` field is first determined from the payload of the identifier token, meaning that it corresponds to the LexemeId.
+/// However, once name resolution occurs, the `id` field is then reused to be the final value of the SymbolId in the symbol table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Var {
     id: SymbolId,
     span: Span
 }
 
 impl Var {
-    pub fn new(span: Span) -> Self {
+    pub fn new(id: SymbolId, span: Span) -> Self {
+        Self { id, span }
+    }
+
+    pub fn with_zero_id(span: Span) -> Self {
         Self {
             id: 0,
             span
+        }
+    }
+
+    pub fn from_token_payload(token: Token) -> Self {
+        Self {
+            id: token.payload() as usize,
+            span: token.span()
         }
     }
 
@@ -445,13 +519,13 @@ impl TryFrom<Token> for Var {
 
     fn try_from(value: Token) -> Result<Self, Self::Error> {
         match value.kind() {
-            TokenKind::Ident => Ok(Var::new(value.span())),
+            TokenKind::Ident => Ok(Var::from_token_payload(value)),
             _ => Err(())
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Let {
     bindings: Vec<Binding>,
     kind: LetKind,
@@ -464,21 +538,21 @@ impl Let {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LetKind {
     Assign,
     Define,
     Declare
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Binding {
     Name(Var, Option<Type>),
     Fn(FnHeader),   // when it is known that it is a function binding
     Call(FnHeader), // when it is unknown whether it is a function or constructor binding
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FnHeader {
     name: Var,
     ty_args: Vec<Generic>,
@@ -505,7 +579,7 @@ impl FnHeader {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Unit {
         span: Span
@@ -550,88 +624,88 @@ impl Type {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Shape {
     Empty,
     Dynamic,
     Specified(Vec<ShapeSpec>)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ShapeSpec {
     Known(Expr), // TODO: Perhaps split into KnownValue(Int) and KnownName(Var)
     Unknown
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Generic {
     pub name: Var,
     // pub sat: Option<Var>      // TODO: figure out if we are going to be doing a sat system or impl or whatnot
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Variant {
     Const(Var),
     Tuple(Vec<Type>),
     Record(Vec<(Var, Type)>)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AliasItem {
-    Ident(Var),
-    Operator(Token)
-}
+// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// pub enum AliasLeft {
+//     Ident(Var),
+//     Operator(Token)
+// }
 
-impl AliasItem {
-    pub fn span(&self) -> Span {
-        match self {
-            Self::Ident(name) => name.span(),
-            Self::Operator(op) => op.span()
-        }
-    }
-}
+// impl AliasItem {
+//     pub fn span(&self) -> Span {
+//         match self {
+//             Self::Ident(name) => name.span(),
+//             Self::Operator(op) => op.span()
+//         }
+//     }
+// } 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AliasTarget {
-    Ident(Var),
-    Operator(Token),
-    OpLit(OpLit),
-    Expr(Expr)
-    // TODO: perhaps also Path?
-}
+// #[derive(Debug, Clone, PartialEq, Eq)]
+// pub enum AliasRight {
+//     Ident(Var),
+//     Operator(Token),
+//     OpLit(OpLit),
+//     Expr(Expr)
+//     // TODO: perhaps also Path?
+// }
 
-impl AliasTarget {
-    pub fn span(&self) -> Span {
-        match self {
-            Self::Ident(name) => name.span(),
-            Self::Operator(op) => op.span(),
-            Self::OpLit(oplit) => oplit.span(), 
-            Self::Expr(expr) => expr.span()
-        }
-    }
-}
+// impl AliasTarget {
+//     pub fn span(&self) -> Span {
+//         match self {
+//             Self::Ident(name) => name.span(),
+//             Self::Operator(op) => op.span(),
+//             Self::OpLit(oplit) => oplit.span(), 
+//             Self::Expr(expr) => expr.span()
+//         }
+//     }
+// }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Endpoint {
     Inclusive(Box<Expr>),
     Exclusive(Box<Expr>),
     Unspecified
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RangeStep {
     Discrete(Box<Expr>),
     Continuous
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Operation {
     Ident(Var),
     Custom(Token),
     OpLit(OpLit),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OpLit {
     name: Var,
     span: Span
@@ -642,12 +716,20 @@ impl OpLit {
         Self { name, span }
     }
 
+    pub fn name(&self) -> Var {
+        self.name
+    }
+
     pub fn span(&self) -> Span {
         self.span
     }
+
+    pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str {
+        self.span.get_lexeme(source_map)
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StringPart {
     Text(String),        // converts escape sequences
     Expr(Expr)

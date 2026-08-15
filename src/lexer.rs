@@ -4,7 +4,7 @@ use std::str::CharIndices;
 use unicode_ident::{is_xid_start, is_xid_continue};
 
 use crate::source::{SourceId, SourceMap, Span};
-use crate::token::{LexerErrorKind, OPERATOR_CHARSET, Token, TokenKind};
+use crate::token::{LexerErrorKind, OPERATOR_CHARSET, Token, TokenKind, ActiveInterner};
 
 #[derive(Debug)]
 pub struct Lexer<'t> {
@@ -27,7 +27,7 @@ impl<'t> Lexer<'t> {
     }
 
     /// Consumes lexer to lex the entire source file.
-    pub fn lex(mut self, source_map: &mut SourceMap) -> Vec<Token> {
+    pub fn lex(mut self, source_map: &mut SourceMap, interner: &mut ActiveInterner) -> Vec<Token> {
         let mut tokens: Vec<Token> = vec![];
 
         self.next();
@@ -122,26 +122,28 @@ impl<'t> Lexer<'t> {
                         Span::new(i, i + 1, self.source)));
                     self.next();
                 } else if ch.is_identifier_start() {
-                    self.lex_ident(false, (i, ch), &mut tokens, source_map);
+                    self.lex_ident(false, (i, ch), &mut tokens, source_map, interner);
                 } else if ch == '\\' {
                     match self.text.peek() {
                         Some(&(new_i, ch)) if OPERATOR_CHARSET.contains(ch) => {
                             let start = i;
                             self.next();
-                            self.lex_operator((new_i, ch), &mut tokens);
+                            self.lex_operator((start, ch), &mut tokens, source_map, interner);
                             
-                            let token = tokens.last_mut().unwrap();
-                            token.set_kind(TokenKind::Ident);
-                            token.set_span_start(start);
+                            tokens
+                                .last_mut()
+                                .unwrap()
+                                .set_kind(TokenKind::Ident);
+                            // token.set_span_start(start);
                         }
 
                         Some(&(new_i, ch)) if ch.is_identifier_continue() => {
                             let start = i;
                             self.next();
-                            self.lex_ident(true, (new_i, ch), &mut tokens, source_map);
+                            self.lex_ident(true, (start, ch), &mut tokens, source_map, interner);
 
-                            let token = tokens.last_mut().unwrap();
-                            token.set_span_start(start);
+                            // let token = tokens.last_mut().unwrap();
+                            // token.set_span_start(start);
                         }
 
                         Some(_) | None => {
@@ -165,7 +167,7 @@ impl<'t> Lexer<'t> {
                     self.next();
 
                     if matches!(self.text.peek(), Some(&(_, c)) if OPERATOR_CHARSET.contains(c)) {
-                        self.lex_operator((i, ch), &mut tokens);
+                        self.lex_operator((i, ch), &mut tokens, source_map, interner);
                     } else {
                         tokens.push(Token::new(
                             TokenKind::ColonEq,
@@ -188,7 +190,7 @@ impl<'t> Lexer<'t> {
                         Span::new(i, i + 1, self.source)));
                     self.next();
                 } else if OPERATOR_CHARSET.contains(ch) {
-                    self.lex_operator((i, ch), &mut tokens);
+                    self.lex_operator((i, ch), &mut tokens, source_map, interner);
                 } else if ch == '`' {
                     tokens.push(Token::new(
                         TokenKind::Backtick,
@@ -589,7 +591,7 @@ impl<'t> Lexer<'t> {
 
     // Note: Does not perform any normalization. But, that still must be done to make sure all identifiers are normalized accoridng to NFC (use unicode-normalization crate). Eg. e and aigu-mark should be normalized to e-aigu.
     /// If being called in the middle of an identifier, then `continuing` should be set to true.
-    fn lex_ident(&mut self, after_slash: bool, ich: (usize, char), tokens: &mut Vec<Token>, source_map: &mut SourceMap) {
+    fn lex_ident(&mut self, after_slash: bool, ich: (usize, char), tokens: &mut Vec<Token>, source_map: &mut SourceMap, interner: &mut ActiveInterner) {
         let start = ich.0;
         let mut end = start + 1;
 
@@ -609,50 +611,22 @@ impl<'t> Lexer<'t> {
 
         let span = Span::new(start, end, self.source);
         let text = source_map
-            .get_source_mut(self.source)
+            .get_source(self.source)
             .data();
 
-        if !after_slash {
-            match &text[start..end] {
-                "let" => tokens.push(Token::new(TokenKind::Let, span)),
-                "var" => tokens.push(Token::new(TokenKind::Var, span)),
-                "const" => tokens.push(Token::new(TokenKind::Const, span)),
-                "fn" => tokens.push(Token::new(TokenKind::Fn, span)),
-                "sym" => tokens.push(Token::new(TokenKind::Sym, span)),
-                "context" => tokens.push(Token::new(TokenKind::Context, span)),
-                "enum" => tokens.push(Token::new(TokenKind::Enum, span)),
-                "struct" => tokens.push(Token::new(TokenKind::Struct, span)),
-                "type" => tokens.push(Token::new(TokenKind::Type, span)),
-                "macro" => tokens.push(Token::new(TokenKind::Macro, span)),
-                "alias" => tokens.push(Token::new(TokenKind::Alias, span)),
-                "for" => tokens.push(Token::new(TokenKind::For, span)),
-                "while" => tokens.push(Token::new(TokenKind::While, span)),
-                "if" => tokens.push(Token::new(TokenKind::If, span)),
-                "else" => tokens.push(Token::new(TokenKind::Else, span)),
-                "match" => tokens.push(Token::new(TokenKind::Match, span)),
-                "when" => tokens.push(Token::new(TokenKind::When, span)),
-                "using" => tokens.push(Token::new(TokenKind::Using, span)),
-                "in" => tokens.push(Token::new(TokenKind::In, span)),
-                "and" => tokens.push(Token::new(TokenKind::And, span)),
-                "or" => tokens.push(Token::new(TokenKind::Or, span)),
-                "xor" => tokens.push(Token::new(TokenKind::Xor, span)),
-                "not" => tokens.push(Token::new(TokenKind::Not, span)),
-                "as" => tokens.push(Token::new(TokenKind::As, span)),
-                // TODO: Need to also lex some specially allowed math tokens, like ∈ as identifiers.
-                "∈" => tokens.push(Token::new(TokenKind::SlashIn, span)),
-                "∉" => tokens.push(Token::new(TokenKind::SlashNotIn, span)),
-                _ => tokens.push(Token::new(TokenKind::Ident, span))
-            }
-        } else {
-            match &text[start..end] {
-                "in" => tokens.push(Token::new(TokenKind::SlashIn, span)),
-                "notin" => tokens.push(Token::new(TokenKind::SlashNotIn, span)),
-                _ => tokens.push(Token::new(TokenKind::Ident, span)),
-            }
-        }
+        let s = interner.get_or_intern(&text[start..end]);
+        tokens.push(Token::with_payload(
+            interner
+                .get_keyword(&s)
+                .unwrap_or(TokenKind::Ident),
+            s
+                .into_inner()
+                .get(),
+            span));
+        // TODO: Need to also lex some specially allowed math tokens, like ∈ as identifiers.
     }
 
-    fn lex_operator(&mut self, ich: (usize, char), tokens: &mut Vec<Token>) {
+    fn lex_operator(&mut self, ich: (usize, char), tokens: &mut Vec<Token>, source_map: &mut SourceMap, interner: &mut ActiveInterner) {
         let start = ich.0;
         let mut end = start + 1;
 
@@ -664,8 +638,13 @@ impl<'t> Lexer<'t> {
             }
         }
 
-        tokens.push(Token::new(
+        let lexeme = &source_map
+            .get_source(self.source)
+            .data()[start..end];
+
+        tokens.push(Token::with_payload(
             TokenKind::Operator,
+            interner.get_or_intern(lexeme).into_inner().get(),
             Span::new(start, end, self.source)));
     }
 

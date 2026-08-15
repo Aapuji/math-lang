@@ -13,6 +13,7 @@ mod token;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::source::{Source, SourceId, SourceKind, SourceMap};
+use crate::token::ActiveInterner;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let main_source = match env::args().skip(1).next() {
@@ -27,18 +28,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         .data()
         .to_owned();
 
-    // println!("{}\n== TOKENS ==", content);
+    println!("{}\n== TOKENS ==", content);
 
+    let mut interner = ActiveInterner::new();
     let lexer = Lexer::new(&content, main_source);
-    let tokens = lexer.lex(&mut source_map);
+    let tokens = lexer.lex(&mut source_map, &mut interner);
+    let interner = interner.into_resolver();
 
     println!("{:#?}", tokens);
     println!("\n== AST ==");
 
     let parser = Parser::new(tokens);
-    let stmts = parser.parse(&mut source_map);
+    let stmts = parser.parse(&mut source_map, &interner);
 
     println!("{:#?}", stmts);
-
+    
     Ok(())
 }

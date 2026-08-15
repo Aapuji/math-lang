@@ -1,11 +1,12 @@
+use std::ffi::FromBytesWithNulError::InteriorNul;
 use std::iter::{Chain, Peekable, Repeat, repeat};
 use std::vec::IntoIter;
 
 use rug::{Integer, Rational};
 
-use crate::{ast::*, source};
+use crate::ast::*;
 use crate::source::{SourceMap, Span};
-use crate::token::{Token, TokenKind};
+use crate::token::{ResolvedInterner, Token, TokenKind};
 
 type TokenStream = Peekable<Chain<IntoIter<Token>, Repeat<Token>>>;
 
@@ -32,7 +33,7 @@ impl Parser {
         }
     }
 
-    pub fn parse(mut self, source_map: &mut SourceMap) -> Vec<Stmt> {
+    pub fn parse(mut self, source_map: &mut SourceMap, interner: &ResolvedInterner) -> Vec<Stmt> {
         let mut stmts = vec![];
         // let top_env = ExpEnv::new();
 
@@ -41,17 +42,17 @@ impl Parser {
                 continue
             }            
 
-            stmts.push(self.parse_stmt(source_map));
+            stmts.push(self.parse_stmt(source_map, interner));
         }
 
         stmts
     }
 
-    fn parse_stmt(&mut self, source_map: &SourceMap) -> Stmt {
+    fn parse_stmt(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Stmt {
         if self.starts_non_expr_stmt() {
-            self.parse_non_expr_stmt(source_map)
+            self.parse_non_expr_stmt(source_map, interner)
         } else {
-            self.parse_expr_stmt(source_map)
+            self.parse_expr_stmt(source_map, interner)
         }
     }
 
@@ -71,36 +72,36 @@ impl Parser {
         )
     }
 
-    fn parse_non_expr_stmt(&mut self, source_map: &SourceMap) -> Stmt {
+    fn parse_non_expr_stmt(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Stmt {
         match self.current_kind() {
-            TokenKind::Let => self.parse_let(source_map, false),
-            TokenKind::Var => self.parse_var(source_map, false),
-            TokenKind::Const => self.parse_const(source_map, false),
-            TokenKind::Fn => self.parse_fn(source_map, false),
-            TokenKind::Sym => self.parse_sym(source_map),
-            TokenKind::Enum => self.parse_enum(source_map), // TODO: determine if we should have `in` for enum & struct
-            TokenKind::Struct => self.parse_struct(source_map),
-            TokenKind::Type => self.parse_type_def(source_map),
-            TokenKind::Alias => self.parse_alias(source_map),
+            TokenKind::Let => self.parse_let(source_map, false, interner),
+            TokenKind::Var => self.parse_var(source_map, false, interner),
+            TokenKind::Const => self.parse_const(source_map, false, interner),
+            TokenKind::Fn => self.parse_fn(source_map, false, interner),
+            TokenKind::Sym => self.parse_sym(source_map, interner),
+            TokenKind::Enum => self.parse_enum(source_map, interner), // TODO: determine if we should have `in` for enum & struct
+            TokenKind::Struct => self.parse_struct(source_map, interner),
+            TokenKind::Type => self.parse_type_def(source_map, interner),
+            // TokenKind::Alias => self.parse_alias(source_map),
             _ => todo!()
         }
     }
 
-    fn parse_let(&mut self, source_map: &SourceMap, in_expr: bool) -> Stmt {
+    fn parse_let(&mut self, source_map: &SourceMap, in_expr: bool, interner: &ResolvedInterner) -> Stmt {
         let span_start = self.current().span().start();
         self.accept(TokenKind::Let);
 
-        let bindings = self.parse_bindings(source_map);
+        let bindings = self.parse_bindings(source_map, interner);
         let (kind, value) = if self.accept(TokenKind::Eq) {
-            (LetKind::Assign, Some(self.parse_expr(source_map)))
+            (LetKind::Assign, Some(self.parse_expr(source_map, interner)))
         } else if self.accept(TokenKind::ColonEq) {
-            (LetKind::Define, Some(self.parse_expr(source_map)))
+            (LetKind::Define, Some(self.parse_expr(source_map, interner)))
         } else {
             (LetKind::Declare, None)
         };
 
         if self.accept(TokenKind::In) {
-            let expr = self.parse_expr(source_map);
+            let expr = self.parse_expr(source_map, interner);
 
             let span_end = if in_expr {
                 expr.span().end()
@@ -132,11 +133,11 @@ impl Parser {
         }
     }
 
-    fn parse_bindings(&mut self, source_map: &SourceMap) -> Vec<Binding> {
+    fn parse_bindings(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Vec<Binding> {
         let mut bindings = vec![];
 
         loop {
-            bindings.push(self.parse_binding(source_map));
+            bindings.push(self.parse_binding(source_map, interner));
 
             if self.accept(TokenKind::Comma) {
                 continue
@@ -149,7 +150,7 @@ impl Parser {
     }
 
     // TODO: Record, Tuple, Destructuring, Rest, and _ bindings, and distinguishing Tuple Constructor from Function Call
-    fn parse_binding(&mut self, source_map: &SourceMap) -> Binding {
+    fn parse_binding(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Binding {
         let name: Var = self.require(TokenKind::Ident)
             .unwrap_or_else(|| todo!("identifier expected"))
             .try_into()
@@ -157,15 +158,15 @@ impl Parser {
         let span_start = name.span().start();
 
         if let Some("<") = self.current_op(source_map) {
-            Binding::Fn(self.finish_header(source_map, name, span_start))
+            Binding::Fn(self.finish_header(source_map, name, span_start, interner))
         } else if let TokenKind::LParen = self.current_kind() {
-            Binding::Call(self.finish_header(source_map, name, span_start))
+            Binding::Call(self.finish_header(source_map, name, span_start, interner))
         } else {
-            Binding::Name(name, self.parse_type_annotation(source_map))
+            Binding::Name(name, self.parse_type_annotation(source_map, interner))
         }
     }
 
-    fn parse_var(&mut self, source_map: &SourceMap, in_expr: bool) -> Stmt {        
+    fn parse_var(&mut self, source_map: &SourceMap, in_expr: bool, interner: &ResolvedInterner) -> Stmt {        
         let span_start = self.current().span().start();
         self.accept(TokenKind::Var);
         
@@ -175,13 +176,13 @@ impl Parser {
         let name = self.current().try_into().unwrap();
         self.advance();
 
-        let ty = self.parse_type_annotation(source_map);
+        let ty = self.parse_type_annotation(source_map, interner);
         let def = if self.accept(TokenKind::Eq) {
-            Some(self.parse_expr(source_map))
+            Some(self.parse_expr(source_map, interner))
         } else { None };
 
         if self.accept(TokenKind::In) {
-            let expr = self.parse_expr(source_map);
+            let expr = self.parse_expr(source_map, interner);
 
             let span_end = if in_expr {
                 expr.span().end()
@@ -219,7 +220,7 @@ impl Parser {
         }
     }
 
-    fn parse_const(&mut self, source_map: &SourceMap, in_expr: bool) -> Stmt {        
+    fn parse_const(&mut self, source_map: &SourceMap, in_expr: bool, interner: &ResolvedInterner) -> Stmt {        
         let span_start = self.current().span().start();
         self.accept(TokenKind::Const);
         
@@ -229,13 +230,13 @@ impl Parser {
         let name = self.current().try_into().unwrap();
         self.advance();
 
-        let ty = self.parse_type_annotation(source_map);
+        let ty = self.parse_type_annotation(source_map, interner);
         let def = if self.accept(TokenKind::Eq) {
-            Some(self.parse_expr(source_map))
+            Some(self.parse_expr(source_map, interner))
         } else { None };
 
         if self.accept(TokenKind::In) {
-            let expr = self.parse_expr(source_map);
+            let expr = self.parse_expr(source_map, interner);
 
             let span_end = if in_expr {
                 expr.span().end()
@@ -273,13 +274,13 @@ impl Parser {
         }
     }
 
-    fn parse_fn(&mut self, source_map: &SourceMap, in_expr: bool) -> Stmt {
+    fn parse_fn(&mut self, source_map: &SourceMap, in_expr: bool, interner: &ResolvedInterner) -> Stmt {
         let span_start = self.current().span().start();
         self.accept(TokenKind::Fn);
 
-        let header = self.parse_header(source_map);
+        let header = self.parse_header(source_map, interner);
         let (span_end, value) = if self.accept(TokenKind::Eq) {
-            let expr = self.parse_expr(source_map);
+            let expr = self.parse_expr(source_map, interner);
 
             let span_end = if in_expr {
                 expr.span().end()
@@ -292,7 +293,7 @@ impl Parser {
 
             (span_end, expr)
         } else if let TokenKind::LBrace = self.current_kind() {
-            let block = self.parse_block(source_map);
+            let block = self.parse_block(source_map, interner);
 
             (block.span().end(), block)
         } else {
@@ -300,7 +301,7 @@ impl Parser {
         };
 
         if self.accept(TokenKind::In) {
-            let expr = self.parse_expr(source_map);
+            let expr = self.parse_expr(source_map, interner);
 
             let span_end = if in_expr {
                 expr.span().end()
@@ -333,20 +334,20 @@ impl Parser {
         }
     }
 
-    fn parse_header(&mut self, source_map: &SourceMap) -> FnHeader {
+    fn parse_header(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> FnHeader {
         let name: Var = self.require(TokenKind::Ident)
             .unwrap_or_else(|| todo!("identifier expected"))
             .try_into()
             .unwrap();
         let span_start = name.span().start();
 
-        self.finish_header(source_map, name, span_start)
+        self.finish_header(source_map, name, span_start, interner)
     }
 
-    fn finish_header(&mut self, source_map: &SourceMap, name: Var, span_start: usize) -> FnHeader {
+    fn finish_header(&mut self, source_map: &SourceMap, name: Var, span_start: usize, interner: &ResolvedInterner) -> FnHeader {
         let ty_args = self.parse_generic(source_map);
-        let (args, kwargs, args_span_end) = self.parse_args_def(source_map);
-        let ty = self.parse_type_annotation(source_map);
+        let (args, kwargs, args_span_end) = self.parse_args_def(source_map, interner);
+        let ty = self.parse_type_annotation(source_map, interner);
 
         let span_end = if let Some(ref ty) = ty {
             ty.span().end()
@@ -365,7 +366,7 @@ impl Parser {
     }
 
     /// Parses an args definition, meaning args, kwargs, and any type annotations for them. It returns args, kwargs, and the span end of the whole definition.
-    fn parse_args_def(&mut self, source_map: &SourceMap) -> (Vec<(Var, Option<Type>)>, Vec<(Var, Option<Type>)>, usize) {
+    fn parse_args_def(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> (Vec<(Var, Option<Type>)>, Vec<(Var, Option<Type>)>, usize) {
         let mut args = vec![];
         let mut kwargs = vec![];
         let mut in_kwargs = false;
@@ -381,7 +382,7 @@ impl Parser {
             else { todo!("expected identifier") };
 
             let arg = arg.try_into().unwrap();
-            let ty = self.parse_type_annotation(source_map);
+            let ty = self.parse_type_annotation(source_map, interner);
             
             if in_kwargs {
                 kwargs.push((arg, ty));
@@ -414,10 +415,10 @@ impl Parser {
     }
 
     /// Attempts to parse a type annotation. Either it will be a regular type annotation, or an implicit refinement type annotation, or there may be no type annotation, in which it will output None.
-    fn parse_type_annotation(&mut self, source_map: &SourceMap) -> Option<Type> {
+    fn parse_type_annotation(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Option<Type> {
         // : Type
         if self.accept_op(source_map, ":") {
-            Some(self.parse_type(source_map))
+            Some(self.parse_type(source_map, interner))
         // :: Implicit Refinement
         } else if self.accept_op(source_map, "::") {
             todo!()
@@ -426,7 +427,7 @@ impl Parser {
         }
     }
 
-    fn parse_sym(&mut self, source_map: &SourceMap) -> Stmt {
+    fn parse_sym(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Stmt {
         let span_start = self.current().span().start();
         self.accept(TokenKind::Sym);
 
@@ -435,7 +436,7 @@ impl Parser {
         let name = name.try_into().unwrap();
 
         let mut args = if let TokenKind::LParen = self.current_kind() {
-            let (args, kwargs, _) = self.parse_args_def(source_map);
+            let (args, kwargs, _) = self.parse_args_def(source_map, interner);
             if !kwargs.is_empty() {
                 todo!("keyword arguments are not allowed in a symbolic node definition");
             }
@@ -445,7 +446,7 @@ impl Parser {
             vec![]
         };
 
-        let ty = self.parse_type_annotation(source_map);
+        let ty = self.parse_type_annotation(source_map, interner);
 
         let Some(semi) = self.require(TokenKind::Semicolon)
         else { todo!("expected semicolon") };
@@ -458,7 +459,7 @@ impl Parser {
         }
     }
 
-    fn parse_enum(&mut self, source_map: &SourceMap) -> Stmt {
+    fn parse_enum(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Stmt {
         let span_start = self.current().span().start();
         self.accept(TokenKind::Enum);
 
@@ -491,7 +492,7 @@ impl Parser {
 
                 let mut data = vec![];
                 loop {
-                    data.push(self.parse_type(source_map));
+                    data.push(self.parse_type(source_map, interner));
 
                     if self.accept(TokenKind::RParen)
                         || (self.expect(TokenKind::Comma) && self.accept(TokenKind::RBrace)) {
@@ -512,7 +513,7 @@ impl Parser {
                     let key = key.try_into().unwrap();
 
                     self.expect_op(source_map, ":");
-                    let ty = self.parse_type(source_map);
+                    let ty = self.parse_type(source_map, interner);
 
                     entries.push((key, ty));
 
@@ -547,7 +548,7 @@ impl Parser {
         }
     }
 
-    fn parse_struct(&mut self, source_map: &SourceMap) -> Stmt {
+    fn parse_struct(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Stmt {
         let span_start = self.current().span().start();
         self.accept(TokenKind::Struct);
 
@@ -575,7 +576,7 @@ impl Parser {
             let field = field.try_into().unwrap();
 
             self.expect_op(source_map, ":");
-            let ty = self.parse_type(source_map);
+            let ty = self.parse_type(source_map, interner);
 
             fields.push((field, ty));
 
@@ -599,7 +600,7 @@ impl Parser {
         }
     }
 
-    fn parse_type_def(&mut self, source_map: &SourceMap) -> Stmt {
+    fn parse_type_def(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Stmt {
         let span_start = self.current().span().start();
         self.accept(TokenKind::Type);
 
@@ -612,7 +613,7 @@ impl Parser {
         // TODO: abstract type (abstract type T;), just type (type T;) declarations
         self.expect(TokenKind::Eq);
 
-        let def = self.parse_type(source_map);
+        let def = self.parse_type(source_map, interner);
         
         let Some(semi) = self.require(TokenKind::Semicolon)
         else { todo!("expected semicolon") };
@@ -625,76 +626,76 @@ impl Parser {
         }
     }
 
-fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
-    let span_start = self.current().span().start();
-    self.accept(TokenKind::Alias);
+// fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
+//     let span_start = self.current().span().start();
+//     self.accept(TokenKind::Alias);
 
-    let new = match self.current_kind() {
-        TokenKind::Ident => {
-            let name = AliasItem::Ident(self.current().try_into().unwrap());
-            self.advance();
+//     let new = match self.current_kind() {
+//         TokenKind::Ident => {
+//             let name = AliasItem::Ident(self.current().try_into().unwrap());
+//             self.advance();
 
-            name
-        }
+//             name
+//         }
 
-        TokenKind::Operator => {
-            let op = AliasItem::Operator(self.current());
-            self.advance();
+//         TokenKind::Operator => {
+//             let op = AliasItem::Operator(self.current());
+//             self.advance();
 
-            op
-        }
+//             op
+//         }
 
-        _ => todo!("expected identifier or operator")
-    };
+//         _ => todo!("expected identifier or operator")
+//     };
 
-    self.expect(TokenKind::For);
+//     self.expect(TokenKind::For);
 
-    let old = match self.current_kind() {
-        TokenKind::Ident => {
-            let name = AliasTarget::Ident(self.current().try_into().unwrap());
-            self.advance();
+//     let old = match self.current_kind() {
+//         TokenKind::Ident => {
+//             let name = AliasTarget::Ident(self.current().try_into().unwrap());
+//             self.advance();
 
-            name
-        }
+//             name
+//         }
 
-        TokenKind::Operator => {
-            let op = AliasTarget::Operator(self.current());
-            self.advance();
+//         TokenKind::Operator => {
+//             let op = AliasTarget::Operator(self.current());
+//             self.advance();
 
-            op
-        }
+//             op
+//         }
 
-        TokenKind::Backtick => {
-            let bt = self.current();
-            let operator = self.parse_operator_literal(bt.span().start());
+//         TokenKind::Backtick => {
+//             let bt = self.current();
+//             let operator = self.parse_operator_literal(bt.span().start());
 
-            AliasTarget::OpLit(operator)
-        },
-        TokenKind::LParen => {
-            let lp = self.current();
-            self.advance();
+//             AliasTarget::OpLit(operator)
+//         },
+//         TokenKind::LParen => {
+//             let lp = self.current();
+//             self.advance();
             
-            let mut expr = self.parse_expr(source_map);
-            let Some(rp) = self.require(TokenKind::RParen)
-            else { todo!("expected ')'") };
+//             let mut expr = self.parse_expr(source_map);
+//             let Some(rp) = self.require(TokenKind::RParen)
+//             else { todo!("expected ')'") };
 
-            expr.span_mut().set_start(lp.span().start());
-            expr.span_mut().set_end(rp.span().end());
+//             expr.span_mut().set_start(lp.span().start());
+//             expr.span_mut().set_end(rp.span().end());
 
-            AliasTarget::Expr(expr)
-        },
-        _ => todo!("expected identifier, operator, operator literal, or expression surrounded with parentheses")
-    };
+//             AliasTarget::Expr(expr)
+//         },
+//         _ => todo!("expected identifier, operator, operator literal, or expression surrounded with parentheses")
+//     };
 
-    let Some(semi) = self.require(TokenKind::Semicolon)
-    else { todo!("expected semicolon") };
+//     let Some(semi) = self.require(TokenKind::Semicolon)
+//     else { todo!("expected semicolon") };
 
-    Stmt::Alias {
-        new,
-        old,
-        span: Span::new(span_start, semi.span().end(), semi.span().source_id())
-    }
-}
+//     Stmt::Alias {
+//         new,
+//         old,
+//         span: Span::new(span_start, semi.span().end(), semi.span().source_id())
+//     }
+// }
 
     /// Outputs empty vector if no generic arguments are seen. 
     fn parse_generic(&mut self, source_map: &SourceMap) -> Vec<Generic> {
@@ -739,15 +740,15 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
     //     self.require(TokenKind::Ident).unwrap()
     // }
 
-    fn parse_type(&mut self, source_map: &SourceMap) -> Type {        
-        self.parse_exponential_type(source_map)
+    fn parse_type(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Type {        
+        self.parse_exponential_type(source_map, interner)
     }
 
-    fn parse_exponential_type(&mut self, source_map: &SourceMap) -> Type {
-        let ty = self.parse_primary_type(source_map);
+    fn parse_exponential_type(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Type {
+        let ty = self.parse_primary_type(source_map, interner);
 
         if self.accept_op(source_map, "^") {
-            let exponent = self.parse_primary(source_map);
+            let exponent = self.parse_primary(source_map, interner);
 
             if let Expr::Int {..} = exponent {
                 Type::Exponent {
@@ -763,10 +764,10 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
         }
     }
 
-    fn parse_primary_type(&mut self, source_map: &SourceMap) -> Type {
+    fn parse_primary_type(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Type {
         match self.current_kind() {
-            TokenKind::LBracket => self.parse_array_type(source_map),
-            TokenKind::LParen => self.parse_grouping_type(source_map),
+            TokenKind::LBracket => self.parse_array_type(source_map, interner),
+            TokenKind::LParen => self.parse_grouping_type(source_map, interner),
             TokenKind::Ident => {
                 let ty = Type::Named(self.current().try_into().unwrap());
                 self.advance();
@@ -777,7 +778,7 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
         }
     }
 
-    fn parse_array_type(&mut self, source_map: &SourceMap) -> Type {
+    fn parse_array_type(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Type {
         let span_start = self.current().span().start();
         self.accept(TokenKind::LBracket);
 
@@ -814,7 +815,7 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
                 } else if self.accept_op(source_map, "*") {
                     todo!("multirank arrays cannot have dynamic shape")
                 } else {
-                    let expr = self.parse_primary(source_map);
+                    let expr = self.parse_primary(source_map, interner);
 
                     match expr {
                         Expr::Ident(_)   |
@@ -830,7 +831,7 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
             Shape::Specified(shape_specs)
         };
 
-        let ty = self.parse_type(source_map);
+        let ty = self.parse_type(source_map, interner);
 
         Type::Array {
             span: Span::new(span_start, ty.span().end(), ty.span().source_id()),
@@ -839,7 +840,7 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
         }
     }
 
-    fn parse_grouping_type(&mut self, source_map: &SourceMap) -> Type {
+    fn parse_grouping_type(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Type {
         let span_start = self.current().span().start();
         self.accept(TokenKind::LParen);
 
@@ -848,7 +849,7 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
                 span: Span::new(span_start, rp.span().end(), rp.span().source_id())
             }
         } else {
-            let mut ty = self.parse_type(source_map);
+            let mut ty = self.parse_type(source_map, interner);
 
             if let Some(rp) = self.take(TokenKind::RParen) {
                 ty.span_mut().set_start(span_start);
@@ -889,7 +890,7 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
                 }
 
                 loop {
-                    let ty = self.parse_type(source_map);
+                    let ty = self.parse_type(source_map, interner);
 
                     if let Type::Exponent { ty: lhs, exp, span: exp_span } = &ty {
                         if let Expr::Int {  value, .. } = Box::as_ref(exp) {
@@ -932,8 +933,8 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
         }
     }
 
-    fn parse_expr_stmt(&mut self, source_map: &SourceMap) -> Stmt {
-        let expr = self.parse_expr(source_map);
+    fn parse_expr_stmt(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Stmt {
+        let expr = self.parse_expr(source_map, interner);
 
         if let Some(semi) = self.take(TokenKind::Semicolon) {
             Stmt::Expr {
@@ -945,15 +946,15 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
         }
     }
 
-    fn parse_expr(&mut self, source_map: &SourceMap) -> Expr {
+    fn parse_expr(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
         if let TokenKind::LBrace = self.peek_kind() {
-            self.parse_block(source_map)
+            self.parse_block(source_map, interner)
         } else {
-            self.parse_or(source_map)
+            self.parse_or(source_map, interner)
         }
     }
 
-    fn parse_block(&mut self, source_map: &SourceMap) -> Expr {
+    fn parse_block(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
         let span_start = self.current().span().start();
         self.accept(TokenKind::LBrace);
         
@@ -962,10 +963,10 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
 
         while self.current_kind() != TokenKind::RBrace {
             if self.starts_non_expr_stmt() {
-                let stmt = self.parse_non_expr_stmt(source_map);
+                let stmt = self.parse_non_expr_stmt(source_map, interner);
                 stmts.push(stmt);
             } else {
-                let expr = self.parse_expr(source_map);
+                let expr = self.parse_expr(source_map, interner);
 
                 if let Some(semi) = self.take(TokenKind::Semicolon) {
                     stmts.push(Stmt::Expr {
@@ -988,11 +989,11 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
         }
     }
 
-    fn parse_or(&mut self, source_map: &SourceMap) -> Expr {
-        let lhs = self.parse_xor(source_map);
+    fn parse_or(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        let lhs = self.parse_xor(source_map, interner);
 
         if self.accept(TokenKind::Or) {
-            let rhs = Box::new(self.parse_or(source_map));
+            let rhs = Box::new(self.parse_or(source_map, interner));
 
             Expr::Or {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1004,11 +1005,11 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
         }
     }
 
-    fn parse_xor(&mut self, source_map: &SourceMap) -> Expr {
-        let lhs = self.parse_and(source_map);
+    fn parse_xor(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        let lhs = self.parse_and(source_map, interner);
 
         if self.accept(TokenKind::Xor) {
-            let rhs = Box::new(self.parse_xor(source_map));
+            let rhs = Box::new(self.parse_xor(source_map, interner));
 
             Expr::Xor {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1020,11 +1021,11 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
         }
     }
 
-    fn parse_and(&mut self, source_map: &SourceMap) -> Expr {
-        let lhs = self.parse_not(source_map);
+    fn parse_and(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        let lhs = self.parse_not(source_map, interner);
 
         if self.accept(TokenKind::And) {
-            let rhs = Box::new(self.parse_and(source_map));
+            let rhs = Box::new(self.parse_and(source_map, interner));
 
             Expr::And {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1036,26 +1037,26 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
         }
     }
 
-    fn parse_not(&mut self, source_map: &SourceMap) -> Expr {
+    fn parse_not(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
         if self.accept(TokenKind::Not) {
-            let expr = self.parse_not(source_map);
+            let expr = self.parse_not(source_map, interner);
             
             Expr::Not {
                 span: Span::new(expr.span().start(), expr.span().end(), expr.span().source_id()),
                 expr: Box::new(expr)
             }
         } else {
-            self.parse_comparison(source_map)
+            self.parse_comparison(source_map, interner)
         }
     }
 
-    fn parse_comparison(&mut self, source_map: &SourceMap) -> Expr {
-        let lhs = self.parse_range(source_map);
+    fn parse_comparison(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        let lhs = self.parse_range(source_map, interner);
 
         macro_rules! parse_comparison {
             ($node_kind:ident) => {
                 {
-                    let rhs = self.parse_comparison(source_map);
+                    let rhs = self.parse_comparison(source_map, interner);
                     if let Some((lhsr, _)) = rhs.is_comparison_node() {
                         Expr::And {
                             span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1117,7 +1118,7 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
         }
     }
 
-    fn parse_range(&mut self, source_map: &SourceMap) -> Expr {
+    fn parse_range(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
         let id = |x: Expr, _range_span: Span| x;
         let pos = |x: Expr, range_span: Span| Expr::UnaryPlus {
             span: Span::new(range_span.end() - 1, x.span().end(), x.span().source_id()),
@@ -1135,19 +1136,22 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
                 Endpoint::Unspecified, 
                 (false, false),
                 id,
-                range_span),
+                range_span,
+                interner),
             Some("..+") => self.finish_discrete_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, false),
                 pos,
-                range_span),
+                range_span,
+                interner),
             Some("..-") => self.finish_discrete_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, false),
                 neg,
-                range_span),
+                range_span,
+                interner),
             Some("<..") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<..+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<..-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
@@ -1156,19 +1160,22 @@ fn parse_alias(&mut self, source_map: &SourceMap) -> Stmt {
                 Endpoint::Unspecified, 
                 (false, true),
                 id,
-                range_span),
+                range_span,
+                interner),
             Some("..<+") => self.finish_discrete_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, true),
                 pos,
-range_span),
+                range_span,
+                interner),
             Some("..<-") => self.finish_discrete_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, true),
                 neg,
-                    range_span),
+                range_span,
+                interner),
             Some("<..<") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<..<+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<..<-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
@@ -1177,19 +1184,22 @@ range_span),
                 Endpoint::Unspecified, 
                 (false, false),
                 id,
-                range_span),
+                range_span,
+                interner),
             Some(":+") => self.finish_cont_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, false),
                 pos,
-                range_span),
+                range_span,
+                interner),
             Some(":-") => self.finish_cont_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, false),
                 neg,
-                range_span),
+                range_span,
+                interner),
             Some("<:") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<:+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<:-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
@@ -1198,27 +1208,35 @@ range_span),
                 Endpoint::Unspecified, 
                 (false, true),
                 id,
-                range_span),
+                range_span,
+                interner),
             Some(":<+") => self.finish_cont_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, true),
                 pos,
-                range_span),
+                range_span,
+                interner),
             Some(":<-") => self.finish_cont_range(
                 source_map, 
                 Endpoint::Unspecified, 
                 (false, true),
                 neg,
-                range_span),
+                range_span,
+                interner),
             Some("<:<") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<:<+") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some("<:<-") => todo!("cannot specify exclusivity for an unspecified endpoint"),
-            Some("::") => self.finish_range_step(source_map, Endpoint::Unspecified, Endpoint::Unspecified, range_span.start()),
+            Some("::") => self.finish_range_step(
+                source_map,
+                Endpoint::Unspecified,
+                Endpoint::Unspecified,
+                range_span.start(),
+                interner),
             Some("<::") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             Some(":<:") => todo!("cannot specify exclusivity for an unspecified endpoint"),
             _ => {
-                let lhs = Box::new(self.parse_additive(source_map));
+                let lhs = Box::new(self.parse_additive(source_map, interner));
 
                 let range_span = self.current().span();
                 match self.current_op(source_map) {
@@ -1227,147 +1245,171 @@ range_span),
                         Endpoint::Inclusive(lhs), 
                         (false, false),
                         id,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("..+") => self.finish_discrete_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, false),
                         pos,
-                    range_span),
+                        range_span,
+                        interner),
                     Some("..-") => self.finish_discrete_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, false),
                         neg,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<..") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
                         id,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<..+") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
                         pos,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<..-") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
                         neg,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("..<") => self.finish_discrete_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
                         id,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("..<+") => self.finish_discrete_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
                         pos,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("..<-") => self.finish_discrete_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
                         neg,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<..<") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
                         id,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<..<+") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
                         pos,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<..<-") => self.finish_discrete_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
                         neg,
-                        range_span),
+                        range_span,
+                        interner),
                     Some(":") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, false),
                         id,
-                        range_span),
+                        range_span,
+                        interner),
                     Some(":+") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, false),
                         pos,
-                        range_span),
+                        range_span,
+                        interner),
                     Some(":-") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, false),
                         neg,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<:") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
                         id,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<:+") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
                         pos,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<:-") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, false),
                         neg,
-                        range_span),
+                        range_span,
+                        interner),
                     Some(":<") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
                         id,
-                        range_span),
+                        range_span,
+                        interner),
                     Some(":<+") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
                         pos,
-                        range_span),
+                        range_span,
+                        interner),
                     Some(":<-") => self.finish_cont_range(
                         source_map, 
                         Endpoint::Inclusive(lhs), 
                         (false, true),
                         neg,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<:<") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
                         id,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<:<+") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
                         pos,
-                        range_span),
+                        range_span,
+                        interner),
                     Some("<:<-") => self.finish_cont_range(
                         source_map,
                         Endpoint::Exclusive(lhs),
                         (true, true),
                         neg,
-                        range_span),
-                    Some("::") => self.finish_range_step(source_map, Endpoint::Inclusive(lhs), Endpoint::Unspecified, range_span.start()),
-                    Some("<::") => self.finish_range_step(source_map, Endpoint::Inclusive(lhs), Endpoint::Unspecified, range_span.start()),
+                        range_span,
+                        interner),
+                    Some("::") => self.finish_range_step(source_map, Endpoint::Inclusive(lhs), Endpoint::Unspecified, range_span.start(), interner),
+                    Some("<::") => self.finish_range_step(source_map, Endpoint::Inclusive(lhs), Endpoint::Unspecified, range_span.start(), interner),
                     Some(":<:") => todo!("cannot specify exclusivity for an unspecified endpoint"),
                     _ => *lhs
                 }
@@ -1375,7 +1417,7 @@ range_span),
         }
     }
 
-    fn finish_discrete_range<W: Fn(Expr, Span) -> Expr>(&mut self, source_map: &SourceMap, lhs: Endpoint, exclusivity: (bool, bool), wrap: W, range_span: Span) -> Expr {
+    fn finish_discrete_range<W: Fn(Expr, Span) -> Expr>(&mut self, source_map: &SourceMap, lhs: Endpoint, exclusivity: (bool, bool), wrap: W, range_span: Span, interner: &ResolvedInterner) -> Expr {
         self.advance();
 
         let span_start = match lhs {
@@ -1396,10 +1438,10 @@ range_span),
             }
         } else {
             let (rhs_span, rhs) = if exclusivity.1 {
-                let expr = self.parse_additive(source_map);
+                let expr = self.parse_additive(source_map, interner);
                 (expr.span(), Endpoint::Exclusive(Box::new(wrap(expr, range_span))))
             } else {
-                let expr = self.parse_additive(source_map);
+                let expr = self.parse_additive(source_map, interner);
                 (expr.span(), Endpoint::Inclusive(Box::new(wrap(expr, range_span))))
             };
 
@@ -1415,7 +1457,7 @@ range_span),
         }
     }
 
-    fn finish_cont_range<W: Fn(Expr, Span) -> Expr>(&mut self, source_map: &SourceMap, lhs: Endpoint, exclusivity: (bool, bool), wrap: W, range_span: Span) -> Expr {
+    fn finish_cont_range<W: Fn(Expr, Span) -> Expr>(&mut self, source_map: &SourceMap, lhs: Endpoint, exclusivity: (bool, bool), wrap: W, range_span: Span, interner: &ResolvedInterner) -> Expr {
         self.advance();
 
         let span_start = match lhs {
@@ -1435,15 +1477,15 @@ range_span),
             todo!("': :' is invalid")
         } else {
             let (rhs_span, rhs) = if exclusivity.1 {
-                let expr = self.parse_additive(source_map);
+                let expr = self.parse_additive(source_map, interner);
                 (expr.span(), Endpoint::Exclusive(Box::new(wrap(expr, range_span))))
             } else {
-                let expr = self.parse_additive(source_map);
+                let expr = self.parse_additive(source_map, interner);
                 (expr.span(), Endpoint::Inclusive(Box::new(wrap(expr, range_span))))
             };
 
             if self.accept_op(source_map, ":") {
-                self.finish_range_step(source_map, lhs, rhs, span_start)
+                self.finish_range_step(source_map, lhs, rhs, span_start, interner)
             } else {
                 Expr::Range {
                     span: Span::new(span_start, rhs_span.end(), rhs_span.source_id()),
@@ -1458,8 +1500,8 @@ range_span),
         }
     }
 
-    fn finish_range_step(&mut self, source_map: &SourceMap, lhs: Endpoint, rhs: Endpoint, span_start: usize) -> Expr {        
-        let expr = self.parse_additive(source_map);
+    fn finish_range_step(&mut self, source_map: &SourceMap, lhs: Endpoint, rhs: Endpoint, span_start: usize, interner: &ResolvedInterner) -> Expr {        
+        let expr = self.parse_additive(source_map, interner);
         let step_span = expr.span();
         let step = RangeStep::Discrete(Box::new(expr));
 
@@ -1471,11 +1513,11 @@ range_span),
         }
     }
 
-    fn parse_additive(&mut self, source_map: &SourceMap) -> Expr {
-        let lhs = self.parse_multiplicative(source_map);
+    fn parse_additive(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        let lhs = self.parse_multiplicative(source_map, interner);
 
         if self.accept_op(source_map, "+") {
-            let rhs = Box::new(self.parse_additive(source_map));
+            let rhs = Box::new(self.parse_additive(source_map, interner));
 
             Expr::Plus {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1483,7 +1525,7 @@ range_span),
                 rhs
             }
         } else if self.accept_op(source_map, "-") {
-            let rhs = Box::new(self.parse_additive(source_map));
+            let rhs = Box::new(self.parse_additive(source_map, interner));
 
             Expr::Minus {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1491,7 +1533,7 @@ range_span),
                 rhs
             }
         } else if self.accept_op(source_map, "+-") {
-            let rhs = Box::new(self.parse_additive(source_map));
+            let rhs = Box::new(self.parse_additive(source_map, interner));
 
             Expr::PlusMinus {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1499,7 +1541,7 @@ range_span),
                 rhs
             }
         } else if self.accept_op(source_map, "-+") {
-            let rhs = Box::new(self.parse_additive(source_map));
+            let rhs = Box::new(self.parse_additive(source_map, interner));
 
             Expr::MinusPlus {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1511,11 +1553,11 @@ range_span),
         }
     }
 
-    fn parse_multiplicative(&mut self, source_map: &SourceMap) -> Expr {
-        let lhs = self.parse_exponentative(source_map);
+    fn parse_multiplicative(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        let lhs = self.parse_exponentative(source_map, interner);
 
         if self.accept_op(source_map, "*") {
-            let rhs = Box::new(self.parse_multiplicative(source_map));
+            let rhs = Box::new(self.parse_multiplicative(source_map, interner));
 
             Expr::Times {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1523,7 +1565,7 @@ range_span),
                 rhs
             }
         } else if self.accept_op(source_map, "/") {
-            let rhs = Box::new(self.parse_multiplicative(source_map));
+            let rhs = Box::new(self.parse_multiplicative(source_map, interner));
 
             Expr::Divide {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1531,7 +1573,7 @@ range_span),
                 rhs
             }
         } else if self.accept_op(source_map, "//") {
-            let rhs = Box::new(self.parse_multiplicative(source_map));
+            let rhs = Box::new(self.parse_multiplicative(source_map, interner));
 
             Expr::IntDivide {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1539,7 +1581,7 @@ range_span),
                 rhs
             }
         } else if self.accept_op(source_map, "%") {
-            let rhs = Box::new(self.parse_multiplicative(source_map));
+            let rhs = Box::new(self.parse_multiplicative(source_map, interner));
 
             Expr::Mod {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1547,7 +1589,7 @@ range_span),
                 rhs
             }
         } else if self.accept_op(source_map, "%%") {
-            let rhs = Box::new(self.parse_multiplicative(source_map));
+            let rhs = Box::new(self.parse_multiplicative(source_map, interner));
 
             Expr::ModClass {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1559,11 +1601,11 @@ range_span),
         }
     }
 
-    fn parse_exponentative(&mut self, source_map: &SourceMap) -> Expr {
-        let lhs = self.parse_custom_operator(source_map);
+    fn parse_exponentative(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        let lhs = self.parse_custom_operator(source_map, interner);
 
         if self.accept_op(source_map, "^") {
-            let rhs = Box::new(self.parse_exponentative(source_map));
+            let rhs = Box::new(self.parse_exponentative(source_map, interner));
 
             Expr::Exp {
                 span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
@@ -1575,17 +1617,17 @@ range_span),
         }
     }
 
-    fn parse_custom_operator(&mut self, source_map: &SourceMap) -> Expr {
+    fn parse_custom_operator(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
         macro_rules! parse_potentially_infix {
             ($lhs:expr) => {
                 if let TokenKind::Ident = self.current_kind() {
                     let operator = self.current().to_owned();
                     self.advance();
 
-                    let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                    let rhs = if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                         unary
                     } else {
-                        self.parse_call(source_map)
+                        self.parse_call(source_map, interner)
                     };
 
                     Expr::Infix {
@@ -1596,10 +1638,10 @@ range_span),
                     }
                 } else if let Some(bt) = self.take(TokenKind::Backtick) {
                     let operator = self.parse_operator_literal(bt.span().start());                      
-                    let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                    let rhs = if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                         unary
                     } else {
-                        self.parse_call(source_map)
+                        self.parse_call(source_map, interner)
                     };
 
                     Expr::Infix {
@@ -1608,14 +1650,14 @@ range_span),
                         operator: Operation::OpLit(operator),
                         rhs: Box::new(rhs)
                     }
-                } else if self.current().can_be_operator() && !self.current().is_builtin_operator(source_map) {
+                } else if self.current().can_be_operator() && !self.current().is_builtin_operator(interner) {
                     let operator = self.current().to_owned();
                     self.advance();
 
-                    let rhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                    let rhs = if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                         unary
                     } else {
-                        self.parse_call(source_map)
+                        self.parse_call(source_map, interner)
                     };
 
                     Expr::Infix {
@@ -1633,16 +1675,16 @@ range_span),
         match self.current_kind() {
             // prefix operation
             TokenKind::Operator => {
-                if let Some(unary) = self.parse_builtin_unary(source_map) {
+                if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                     parse_potentially_infix!(unary)
                 } else {
                     let operator = self.current().to_owned();
                     self.advance();
 
-                    let operand = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                    let operand = if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                         unary
                     } else {
-                        self.parse_call(source_map)
+                        self.parse_call(source_map, interner)
                     };
 
                     Expr::Prefix {
@@ -1670,10 +1712,10 @@ range_span),
                 let operator = self.current().to_owned();
                 self.advance();
 
-                let operand = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                let operand = if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                     unary
                 } else {
-                    self.parse_call(source_map)
+                    self.parse_call(source_map, interner)
                 };
 
                 Expr::Prefix {
@@ -1690,10 +1732,10 @@ range_span),
                 else { todo!("expected backtick") };
 
                 let operator = self.parse_operator_literal(bt.span().start());
-                let operand = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                let operand = if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                     unary
                 } else {
-                    self.parse_call(source_map)
+                    self.parse_call(source_map, interner)
                 };
                 
                 Expr::Prefix {
@@ -1705,10 +1747,10 @@ range_span),
 
             // potential ident/operation as infix operation
             _ => {
-                let lhs = if let Some(unary) = self.parse_builtin_unary(source_map) {
+                let lhs = if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                     unary
                 } else {
-                    self.parse_call(source_map)
+                    self.parse_call(source_map, interner)
                 };
 
                 parse_potentially_infix!(lhs)
@@ -1729,23 +1771,23 @@ range_span),
     }
 
     /// Attempts to parse a built-in unary expression. If it succeeds, it outputs the expression. If it cannot find a built-in unary operator, it returns None.
-    fn parse_builtin_unary(&mut self, source_map: &SourceMap) -> Option<Expr> {
+    fn parse_builtin_unary(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Option<Expr> {
         if let Some(plus) = self.take_op(source_map, "+") {
-            let expr = self.parse_call(source_map);
+            let expr = self.parse_call(source_map, interner);
 
             Some(Expr::UnaryPlus {
                 span: Span::new(plus.span().start(), expr.span().end(), expr.span().source_id()),
                 expr: Box::new(expr),
             })
         } else if let Some(neg) = self.take_op(source_map, "-") {
-            let expr = self.parse_call(source_map);
+            let expr = self.parse_call(source_map, interner);
 
             Some(Expr::Neg {
                 span: Span::new(neg.span().start(), expr.span().end(), expr.span().source_id()),
                 expr: Box::new(expr)
             })
         } else if let Some(spread) = self.take_op(source_map, "...") {
-            let expr = self.parse_call(source_map);
+            let expr = self.parse_call(source_map, interner);
 
             Some(Expr::Spread {
                 span: Span::new(spread.span().start(), expr.span().end(), expr.span().source_id()),
@@ -1757,14 +1799,14 @@ range_span),
     }
 
     /// Parses function calling, indexing, and dot access.
-    fn parse_call(&mut self, source_map: &SourceMap) -> Expr {
-        let mut expr = self.parse_grouping(source_map);
+    fn parse_call(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        let mut expr = self.parse_grouping(source_map, interner);
 
         loop {
             if self.accept(TokenKind::LParen) {
-                expr = self.finish_call(source_map, expr)
+                expr = self.finish_call(source_map, expr, interner)
             } else if self.accept(TokenKind::LBracket) {
-                expr = self.finish_index(source_map, expr)
+                expr = self.finish_index(source_map, expr, interner)
             } else if self.current().is_accessor(source_map) {
                 expr = self.finish_access(source_map, expr)
             } else { // TODO:  dot access via a.b
@@ -1774,7 +1816,7 @@ range_span),
         }
     }
 
-    fn finish_call(&mut self, source_map: &SourceMap, callee: Expr) -> Expr {
+    fn finish_call(&mut self, source_map: &SourceMap, callee: Expr, interner: &ResolvedInterner) -> Expr {
         let mut args = vec![];
         let mut kwargs = vec![];
         let mut in_kwargs = false;
@@ -1805,7 +1847,7 @@ range_span),
                 let value = if let TokenKind::Comma | TokenKind::RParen = self.current_kind() {
                     Expr::Ident(arg)
                 } else {
-                    self.parse_expr(source_map)
+                    self.parse_expr(source_map, interner)
                 };
 
                 kwargs.push((arg, value));
@@ -1813,7 +1855,7 @@ range_span),
             } else if in_kwargs {
                 todo!("positional arguments cannot appear after keyword arguments")
             } else {
-                args.push(self.parse_expr(source_map))
+                args.push(self.parse_expr(source_map, interner))
             }
 
             if let Some(rp) = self.take(TokenKind::RParen) {                
@@ -1836,7 +1878,7 @@ range_span),
         }
     }
 
-    fn finish_index(&mut self, source_map: &SourceMap, indexee: Expr) -> Expr {
+    fn finish_index(&mut self, source_map: &SourceMap, indexee: Expr, interner: &ResolvedInterner) -> Expr {
         let mut args = vec![];
 
         if self.accept(TokenKind::RBracket) {
@@ -1848,7 +1890,7 @@ range_span),
                 todo!("too many arguments")
             }
 
-            args.push(self.parse_expr(source_map));
+            args.push(self.parse_expr(source_map, interner));
 
             if let Some(rb) = self.take(TokenKind::RBracket) {                
                 return Expr::Index {
@@ -1886,7 +1928,7 @@ range_span),
         }
     }
 
-    fn parse_grouping(&mut self, source_map: &SourceMap) -> Expr {
+    fn parse_grouping(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
         if let Some(lp) = self.take(TokenKind::LParen) {
             let span_start = lp.span().start();
 
@@ -1895,7 +1937,7 @@ range_span),
                     span: Span::new(span_start, rp.span().end(), rp.span().source_id())
                 }
             } else {
-                let mut expr = self.parse_expr(source_map);
+                let mut expr = self.parse_expr(source_map, interner);
 
                 if let Some(rp) = self.take(TokenKind::RParen) {
                     expr.span_mut().set_start(span_start);
@@ -1911,7 +1953,7 @@ range_span),
                         }
                     } else {
                         loop {
-                            exprs.push(self.parse_expr(source_map));
+                            exprs.push(self.parse_expr(source_map, interner));
 
                             if let Some(rp) = self.take(TokenKind::RParen) {
                                 break Expr::Tuple {
@@ -1930,45 +1972,45 @@ range_span),
                 }
             }
         } else {
-            self.parse_def_in(source_map)
+            self.parse_def_in(source_map, interner)
         }
     }
 
-    fn parse_def_in(&mut self, source_map: &SourceMap) -> Expr {
+    fn parse_def_in(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
         match self.current_kind() {
             TokenKind::Let => {
-                let Stmt::Expr { expr: let_in, .. } = self.parse_let(source_map, true)
+                let Stmt::Expr { expr: let_in, .. } = self.parse_let(source_map, true, interner)
                 else { todo!() };
 
                 let_in
             }
 
             TokenKind::Var => {
-                let Stmt::Expr { expr: var_in, .. } = self.parse_var(source_map, true)
+                let Stmt::Expr { expr: var_in, .. } = self.parse_var(source_map, true, interner)
                 else { todo!() };
 
                 var_in
             }
 
             TokenKind::Const => {
-                let Stmt::Expr { expr: const_in, .. } = self.parse_const(source_map, true)
+                let Stmt::Expr { expr: const_in, .. } = self.parse_const(source_map, true, interner)
                 else { todo!() };
 
                 const_in
             }
 
             TokenKind::Fn => {
-                let Stmt::Expr { expr: fn_in, .. } = self.parse_fn(source_map, true)
+                let Stmt::Expr { expr: fn_in, .. } = self.parse_fn(source_map, true, interner)
                 else { todo!() };
 
                 fn_in
             }
 
-            _ => self.parse_primary(source_map)
+            _ => self.parse_primary(source_map, interner)
         }
     }
 
-    fn parse_primary(&mut self, source_map: &SourceMap) -> Expr {        
+    fn parse_primary(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {        
         match self.current_kind() {
             TokenKind::Int => {
                 let number = self.current().get_lexeme(source_map).replace('_', "");
@@ -2173,7 +2215,7 @@ range_span),
                                 cur_text = String::new();
                             }
                             
-                            parts.push(StringPart::Expr(self.parse_expr(source_map)));
+                            parts.push(StringPart::Expr(self.parse_expr(source_map, interner)));
                             self.advance();
                         }
 
@@ -2217,7 +2259,7 @@ range_span),
                     let mut row = vec![];
 
                     loop {
-                        row.push(self.parse_expr(source_map));
+                        row.push(self.parse_expr(source_map, interner));
 
                         if let Some(rb) = self.take(TokenKind::RBracket) {
                             rows.push(row);
