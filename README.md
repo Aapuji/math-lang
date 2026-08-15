@@ -16,6 +16,29 @@ let W(z: Complex) = LambertW(z);
 # We can add a rewrite rule
 rewrite rule W($x) + W($y) =>
   W(x * y * (1/W(x) + 1/W(y)));
+
+# Or should it be?
+rewrite sym W($x) + W($y) => ... ;
+
+#= The thought is that 'rule' or 'sym' would only be necessary if I should allow first-class rules
+Because then I could do something like 'rewrite R ...', so it would be necessary to distinguish between
+that and something like 'rewrite rule R ...'
+
+# Some more thoughts...
+# Constraints
+rewrite rule
+   abs($x: Real)
+when x >= 0
+=>
+   x;
+# versus piecewise
+rewrite rule abs($x^2) =>
+   if x >= 0 then x
+   else -x;
+
+# restricted rewriting
+let f(y) = rewrite $x + $x => 2*x in y^4 + y^4;
+let f(y) = y^4 + y^4 /. $x + $x => 2*x # ?
 ```
 ## Doing Probability
 ```
