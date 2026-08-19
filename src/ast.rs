@@ -100,6 +100,7 @@ pub enum Expr {
         parts: Vec<StringPart>,
         span: Span
     },
+    Latex(Box<Expr>),
     Int {
         value: rug::Integer,
         span: Span
@@ -332,6 +333,7 @@ impl Expr {
         match self {
             Self::Ident(var) => var.span,
             Self::String { span, .. } => *span,
+            Self::Latex(expr) => expr.span(),
             Self::Int { span, .. } => *span,
             Self::Real { span, .. } => *span,
             Self::Imag { span, .. } => *span,
@@ -381,6 +383,7 @@ impl Expr {
         match self {
             Self::Ident(var) => &mut var.span,
             Self::String { span, .. } => &mut *span,
+            Self::Latex(expr) => expr.span_mut(),
             Self::Int { span, .. } => &mut *span,
             Self::Real { span, .. } => &mut *span,
             Self::Imag { span, .. } => &mut *span,

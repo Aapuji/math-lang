@@ -1,3 +1,1 @@
-let x = 1;
-let f<T>(x: T, y) = x^2 + y <> T;
-let \alpha = (2 * x ++ y) / 5;
+m"Hello \n{0}";

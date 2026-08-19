@@ -1,10 +1,10 @@
-use std::ffi::FromBytesWithNulError::InteriorNul;
 use std::iter::{Chain, Peekable, Repeat, repeat};
 use std::vec::IntoIter;
 
 use rug::{Integer, Rational};
 
 use crate::ast::*;
+use crate::lexer::StringPrefix;
 use crate::source::{SourceMap, Span};
 use crate::token::{ResolvedInterner, Token, TokenKind};
 
@@ -2173,6 +2173,7 @@ impl Parser {
             TokenKind::StringStart => {
                 let span_start = self.current().span().start();
                 let span_end;
+                let prefix = StringPrefix::try_from_u32(self.current().payload());
                 self.advance();
 
                 let src = source_map
@@ -2215,8 +2216,8 @@ impl Parser {
                                 cur_text = String::new();
                             }
                             
-                            parts.push(StringPart::Expr(self.parse_expr(source_map, interner)));
                             self.advance();
+                            parts.push(StringPart::Expr(self.parse_expr(source_map, interner)));
                         }
 
                         TokenKind::InterpolateEnd => {
@@ -2239,9 +2240,16 @@ impl Parser {
                     }
                 }
 
-                Expr::String {
-                    parts,
-                    span: Span::new(span_start, span_end, self.current().span().source_id())
+                if let Ok(StringPrefix::M | StringPrefix::Fm | StringPrefix::Rm) = prefix {
+                    Expr::Latex(Box::new(Expr::String {
+                        parts,
+                        span: Span::new(span_start, span_end, self.current().span().source_id())
+                    }))
+                } else {
+                    Expr::String {
+                        parts,
+                        span: Span::new(span_start, span_end, self.current().span().source_id())
+                    }
                 }
             }
 

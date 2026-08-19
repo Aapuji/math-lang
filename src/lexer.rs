@@ -42,8 +42,28 @@ impl<'t> Lexer<'t> {
                     self.lex_string((i, ch), &mut tokens, StringPrefix::None);
                 } else if ch == 'f' && matches!(self.text.peek(), Some(&(_, '"'))) {
                     self.lex_string((i, ch), &mut tokens, StringPrefix::F);
+                } else if ch == 'f' && matches!(self.text.peek(), Some(&(_, 'm'))) {
+                    let old_i = i;
+                    self.next();
+
+                    if let Some(&(_, '"')) = self.text.peek() {
+                        self.lex_string((old_i, ch), &mut tokens, StringPrefix::Fm);
+                    } else {
+                        self.lex_ident((old_i, ch), &mut tokens, source_map, interner);
+                    }
                 } else if ch == 'r' && matches!(self.text.peek(), Some(&(_, '"'))) {
                     self.lex_string((i, ch), &mut tokens, StringPrefix::R);
+                } else if ch == 'r'  && matches!(self.text.peek(), Some(&(_, 'm'))) {
+                    let old_i = i;
+                    self.next();
+
+                    if let Some(&(_, '"')) = self.text.peek() {
+                        self.lex_string((old_i, ch), &mut tokens, StringPrefix::Rm);
+                    } else {
+                        self.lex_ident((old_i, ch), &mut tokens, source_map, interner);
+                    }
+                } else if ch == 'm' && matches!(self.text.peek(), Some(&(_, '"'))) {
+                    self.lex_string((i, ch), &mut tokens, StringPrefix::M);
                 } else if ch.is_whitespace() {
                     self.next();
                 } else if ch == '#' {
@@ -122,7 +142,7 @@ impl<'t> Lexer<'t> {
                         Span::new(i, i + 1, self.source)));
                     self.next();
                 } else if ch.is_identifier_start() {
-                    self.lex_ident(false, (i, ch), &mut tokens, source_map, interner);
+                    self.lex_ident((i, ch), &mut tokens, source_map, interner);
                 } else if ch == '\\' {
                     match self.text.peek() {
                         Some(&(new_i, ch)) if OPERATOR_CHARSET.contains(ch) => {
@@ -140,7 +160,7 @@ impl<'t> Lexer<'t> {
                         Some(&(new_i, ch)) if ch.is_identifier_continue() => {
                             let start = i;
                             self.next();
-                            self.lex_ident(true, (start, ch), &mut tokens, source_map, interner);
+                            self.lex_ident((start, ch), &mut tokens, source_map, interner);
 
                             // let token = tokens.last_mut().unwrap();
                             // token.set_span_start(start);
@@ -303,10 +323,27 @@ impl<'t> Lexer<'t> {
 
     fn lex_string(&mut self, ich: (usize, char), tokens: &mut Vec<Token>, prefix: StringPrefix) {
         let start = ich.0;
-        let end = ich.0 + if let StringPrefix::None = prefix { 1 } else { self.next(); 2 };
-        
-        tokens.push(Token::new(
+        let end = ich.0 + match prefix {
+            StringPrefix::None => 1,
+            
+            StringPrefix::F |
+            StringPrefix::R |
+            StringPrefix::M => {
+                self.next();
+                2
+            },
+            
+            StringPrefix::Fm |
+            StringPrefix::Rm => {
+                self.next();
+                3
+            }
+
+        };
+                
+        tokens.push(Token::with_payload(
             TokenKind::StringStart,
+            prefix.into_u32(),
             Span::new(start, end, self.source)));
         
         self.mode_stack.push(LexerMode::String(ich.0, prefix));
@@ -315,7 +352,7 @@ impl<'t> Lexer<'t> {
     }
 
     fn continue_string(&mut self, str_start: usize, tokens: &mut Vec<Token>, prefix: StringPrefix) {
-        use StringPrefix::{None as N, F};
+        use StringPrefix::{None as N, F, M, Fm};
         
         let mut kind = None;
         let mut start = str_start;
@@ -378,7 +415,7 @@ impl<'t> Lexer<'t> {
                 }
 
                 // fstring interpolation
-                (Some((i, '{')), F) => {
+                (Some((i, '{')), F | Fm) => {
                     if let Some(&(i, '{')) = self.text.peek() {
                         if let Some(TokenKind::StringSegment) = kind {
                             end = i + 1;
@@ -407,7 +444,7 @@ impl<'t> Lexer<'t> {
                 }
 
                 // escape sequences
-                (Some((i, '\\')), N | F) => {
+                (Some((i, '\\')), N | F | M | Fm) => {
                     push_prev_tok!();
 
                     kind = Some(TokenKind::EscapeSeq);
@@ -591,7 +628,7 @@ impl<'t> Lexer<'t> {
 
     // Note: Does not perform any normalization. But, that still must be done to make sure all identifiers are normalized accoridng to NFC (use unicode-normalization crate). Eg. e and aigu-mark should be normalized to e-aigu.
     /// If being called in the middle of an identifier, then `continuing` should be set to true.
-    fn lex_ident(&mut self, after_slash: bool, ich: (usize, char), tokens: &mut Vec<Token>, source_map: &mut SourceMap, interner: &mut ActiveInterner) {
+    fn lex_ident(&mut self, ich: (usize, char), tokens: &mut Vec<Token>, source_map: &mut SourceMap, interner: &mut ActiveInterner) {
         let start = ich.0;
         let mut end = start + 1;
 
@@ -776,10 +813,45 @@ impl<'t> Lexer<'t> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StringPrefix {
+pub enum StringPrefix {
     None,
     F,
-    R
+    R,
+    M,
+    Fm,
+    Rm
+}
+
+impl StringPrefix {
+    fn into_u8(self) -> u8 {
+        self as u8
+    }
+
+    pub fn into_u32(self) -> u32 {
+        self as u32
+    }
+
+    fn try_from_u8(n: u8) -> Result<Self, ()> {
+        use StringPrefix::*;
+
+        match n {
+            0 => Ok(None),
+            1 => Ok(F),
+            2 => Ok(R),
+            3 => Ok(M),
+            4 => Ok(Fm),
+            5 => Ok(Rm),
+            _ => Err(())
+        }
+    }
+
+    pub fn try_from_u32(n: u32) -> Result<Self, ()> {
+        if n > u8::MAX as u32 {
+            Err(())
+        } else {
+            Self::try_from_u8(n as u8)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
