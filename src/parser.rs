@@ -1,6 +1,7 @@
 use std::iter::{Chain, Peekable, Repeat, repeat};
 use std::vec::IntoIter;
 
+use lasso::{Key, Spur};
 use rug::{Integer, Rational};
 
 use crate::ast::*;
@@ -82,7 +83,7 @@ impl Parser {
             TokenKind::Enum => self.parse_enum(source_map, interner), // TODO: determine if we should have `in` for enum & struct
             TokenKind::Struct => self.parse_struct(source_map, interner),
             TokenKind::Type => self.parse_type_def(source_map, interner),
-            // TokenKind::Alias => self.parse_alias(source_map),
+            TokenKind::Alias => self.parse_alias(source_map, interner),
             _ => todo!()
         }
     }
@@ -622,6 +623,82 @@ impl Parser {
             name,
             ty_args,
             def,
+            span: Span::new(span_start, semi.span().end(), semi.span().source_id())
+        }
+    }
+
+    fn parse_alias(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Stmt {
+        let span_start = self.current().span().start();
+        self.accept(TokenKind::Alias);
+
+        // alias NEW for OLD
+        let new = match self.current_kind() {
+            TokenKind::Ident => {
+                let ident = AliasLeft::Ident(self.current().try_into().unwrap());
+                self.advance();
+
+                ident
+            }
+
+            TokenKind::Operator => {
+                let op = AliasLeft::Oper(Oper::try_from(self.current()).unwrap());
+                self.advance();
+
+                op
+            }
+
+            _ => todo!("expected identifier or operator")
+        };
+
+        self.expect(TokenKind::For);
+
+        let old = match self.current_kind() {
+            TokenKind::Ident => {
+                let ident = AliasRight::Ident(self.current().try_into().unwrap());
+                self.advance();
+
+                ident
+            }
+
+            TokenKind::Operator => {
+                let op = AliasRight::Oper(Oper::try_from(self.current()).unwrap());
+                self.advance();
+                
+                op
+            }
+
+            TokenKind::Backtick => {
+                let bt = self.current();
+                self.advance();
+
+                let oplit = self.parse_operator_literal(bt.span().start());
+
+                AliasRight::OpLit(oplit)
+            }
+
+            TokenKind::LParen => {
+                let lp = self.current();
+                self.advance();
+
+                let mut expr = self.parse_expr(source_map, interner);
+                let Some(rp) = self.require(TokenKind::RParen)
+                else { todo!("expected ')'") };
+
+                expr.span_mut().set_start(lp.span().start());
+                expr.span_mut().set_end(rp.span().end());
+
+                AliasRight::Expr(expr)
+            }
+
+            _ => todo!("expected identifier, operator, operator literal, or expression surrounded with parentheses")
+        };
+
+        let Some(semi) = self.require(TokenKind::Semicolon)
+        else { todo!("expected ';'") };
+
+        Stmt::Alias {
+            new,
+            old,
             span: Span::new(span_start, semi.span().end(), semi.span().source_id())
         }
     }
@@ -1663,7 +1740,7 @@ impl Parser {
                     Expr::Infix {
                         span: Span::new($lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                         lhs: Box::new($lhs),
-                        operator: Operation::Custom(operator),
+                        operator: Operation::Custom(Oper::try_from(operator).unwrap()),
                         rhs: Box::new(rhs)
                     }
                 } else {
@@ -1689,7 +1766,7 @@ impl Parser {
 
                     Expr::Prefix {
                         span: Span::new(operator.span().start(), operand.span().end(), operand.span().source_id()),
-                        operator: Operation::Custom(operator),
+                        operator: Operation::Custom(Oper::try_from(operator).unwrap()),
                         operand: Box::new(operand)
                     }
                 }
@@ -1758,6 +1835,7 @@ impl Parser {
         }
     }
 
+    /// Backtick must have been consumed before calling this function
     fn parse_operator_literal(&mut self, span_start: usize) -> OpLit {
         if let Some(name) = self.take(TokenKind::Ident) {
             let name = name.try_into().unwrap();

@@ -1,1 +1,1 @@
-m"Hello \n{0}";
+alias hello for (1 + 2);

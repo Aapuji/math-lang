@@ -50,11 +50,11 @@ pub enum Stmt {
         def: Type,
         span: Span
     },
-    // Alias {
-    //     new: AliasLeft,
-    //     old: AliasRight,
-    //     span: Span
-    // },
+    Alias {
+        new: AliasLeft,
+        old: AliasRight,
+        span: Span
+    },
     Expr {
         expr: Expr,
         span: Span
@@ -73,7 +73,7 @@ impl Stmt {
             Self::Struct { span, .. } => *span,
             Self::Type { span, .. } => *span,
             Self::Expr { span, .. } => *span,
-            // Self::Alias { span, .. } => *span
+            Self::Alias { span, .. } => *span
         }
     }
 
@@ -87,7 +87,7 @@ impl Stmt {
             Self::Enum { span, .. } => &mut *span,
             Self::Struct { span, .. } => &mut *span,
             Self::Type { span, .. } => &mut *span,
-            // Self::Alias { span, .. } => &mut *span,
+            Self::Alias { span, .. } => &mut *span,
             Self::Expr { span, .. } => &mut *span,
         }
     }
@@ -428,53 +428,6 @@ impl Expr {
             Self::FnIn { span, .. } => &mut *span,
         }
     }
-
-    // pub fn creates_scope(&self) -> bool {
-    //     Self::Ident(..) => false,
-    //     Self::String { .. } => true,
-    //     Self::Int { .. } => true,
-    //     Self::Real { .. } => true,
-    //     Self::Imag { .. } => true,
-    //     Self::Array { .. } => true,
-    //     Self::Block { .. } => &mut *span,
-    //     Self::Or { .. } => &mut *span,
-    //     Self::Xor { .. } => &mut *span,
-    //     Self::And { .. } => &mut *span,
-    //     Self::Not { .. } => &mut *span,
-    //     Self::Eq { .. } => &mut *span,
-    //     Self::NotEq { .. } => &mut *span,
-    //     Self::Less { .. } => &mut *span,
-    //     Self::Greater { .. } => &mut *span,
-    //     Self::LessEq { .. } => &mut *span,
-    //     Self::GreaterEq { .. } => &mut *span,
-    //     Self::In { .. } => &mut *span,
-    //     Self::Plus { .. } => &mut *span,
-    //     Self::Minus { .. } => &mut *span,
-    //     Self::PlusMinus { .. } => &mut *span,
-    //     Self::MinusPlus { .. } => &mut *span,
-    //     Self::Times { .. } => &mut *span,
-    //     Self::Divide { .. } => &mut *span,
-    //     Self::IntDivide { .. } => &mut *span,
-    //     Self::Mod { .. } => &mut *span,
-    //     Self::ModClass { .. } => &mut *span,
-    //     Self::Exp { .. } => &mut *span,
-    //     Self::Range { .. } => &mut *span,
-    //     Self::Prefix { .. } => &mut *span,
-    //     Self::Infix { .. } => &mut *span,
-    //     Self::UnaryPlus { .. } => &mut *span,
-    //     Self::Neg { .. } => &mut *span,
-    //     Self::Spread { .. } => &mut *span,
-    //     // Self::Apply { .. } => &mut *span,
-    //     Self::Call { .. } => &mut *span,
-    //     Self::Index { .. } => &mut *span,
-    //     Self::MemberAccess { .. } => &mut *span,
-    //     Self::Unit { .. } => &mut *span,
-    //     Self::Tuple { .. } => &mut *span,
-    //     Self::LetIn { .. } => &mut *span,
-    //     Self::VarIn { .. } => &mut *span,
-    //     Self::ConstIn { .. } => &mut *span,
-    //     Self::FnIn { .. } => &mut *span,
-    // }
 }
 
 // TODO: symbol id
@@ -512,6 +465,10 @@ impl Var {
         self.span.get_lexeme(source_map)
     }
 
+    pub fn id(&self) -> SymbolId {
+        self.id
+    }
+
     pub fn span(&self) -> Span {
         self.span
     }
@@ -523,6 +480,65 @@ impl TryFrom<Token> for Var {
     fn try_from(value: Token) -> Result<Self, Self::Error> {
         match value.kind() {
             TokenKind::Ident => Ok(Var::from_token_payload(value)),
+            _ => Err(())
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Oper {
+    id: LexemeId,
+    span: Span
+}
+
+impl Oper {
+    pub fn new_unchecked(id: LexemeId, span: Span) -> Self {
+        Self { id, span }
+    }
+
+    /// Checks if `id` is nonzero
+    pub fn new(id: LexemeId, span: Span) -> Result<Self, ()> {
+        if id == 0 {
+            Err(())
+        } else {
+            Ok(Self::new_unchecked(id, span))
+        }
+    }
+
+    pub fn from_token_payload_unchecked(token: Token) -> Self {
+        Self {
+            id: token.payload(),
+            span: token.span()
+        }
+    }
+
+    pub fn from_token_payload(token: Token) -> Result<Self, ()> {
+        if token.payload() == 0 {
+            Err(())
+        } else {
+            Ok(Self::from_token_payload_unchecked(token))
+        }
+    }
+
+    pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str {
+        self.span.get_lexeme(source_map)
+    }
+
+    pub fn id(&self) -> LexemeId {
+        self.id
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl TryFrom<Token> for Oper {
+    type Error = ();
+
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        match value.kind() {
+            TokenKind::Operator => Oper::from_token_payload(value),
             _ => Err(())
         }
     }
@@ -653,11 +669,19 @@ pub enum Variant {
     Record(Vec<(Var, Type)>)
 }
 
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// pub enum AliasLeft {
-//     Ident(Var),
-//     Operator(Token)
-// }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AliasLeft {
+    Ident(Var),
+    Oper(Oper)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AliasRight {
+    Ident(Var),
+    Oper(Oper),
+    OpLit(OpLit),
+    Expr(Expr)
+}
 
 // impl AliasItem {
 //     pub fn span(&self) -> Span {
@@ -704,7 +728,7 @@ pub enum RangeStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Operation {
     Ident(Var),
-    Custom(Token),
+    Custom(Oper),
     OpLit(OpLit),
 }
 
