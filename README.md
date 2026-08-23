@@ -72,7 +72,7 @@ let f(x) = x^2 - 5x + 6;
 let x :=
   f(x) = 0;
 
-let g = deriv(f, x);
+let g = deriv(f(x), x);
 let y :=
   g(x) = 0;
 ```
