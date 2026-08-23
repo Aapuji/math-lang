@@ -48,7 +48,7 @@ enum Food {
   Croissant
 }
 
-@@distribution
+@distribution
 let FoodDist(food: Food) = match food {
   Food.Apple     => 0.5,
   Food.Banana    => 0.3,
