@@ -1,1 +1,2 @@
-alias hello for (1 + 2);
+alias x for (1+2);
+alias /? for x;

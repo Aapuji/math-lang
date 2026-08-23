@@ -4,12 +4,14 @@ use std::path::PathBuf;
 use std::error::Error;
 
 mod ast;
+mod alias_resolver;
 mod config;
 mod lexer;
 mod parser;
 mod source;
 mod token;
 
+use crate::alias_resolver::AliasResolver;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::source::{Source, SourceId, SourceKind, SourceMap};
@@ -39,9 +41,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("\n== AST ==");
 
     let parser = Parser::new(tokens);
-    let stmts = parser.parse(&mut source_map, &interner);
+    let mut stmts = parser.parse(&mut source_map, &interner);
 
-    println!("{:#?}", stmts);
+    // println!("{:#?}\n", stmts);
+
+    let mut alias_resolver = AliasResolver::new();
+    alias_resolver.resolve_aliases(&mut stmts);
+    
+    println!("== ALIAS RESOLVER ==\n{:#?}\n", alias_resolver);
+    // println!("== ALIASED AST ==\n{:#?}", stmts);
     
     Ok(())
 }
