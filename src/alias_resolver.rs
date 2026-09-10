@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::mem::discriminant;
 
-use crate::ast::{AliasLeft, AliasRight, Expr, OpLit, Oper, Stmt, Var};
+// TODO: rewrite without references
+// TODO: Have a phase (or maybe in this phase when resolving a prefix or infix custom op) to reassociate resolved expressions
+
+use crate::ast::{AliasLeft, AliasRight, Endpoint, Expr, OpLit, Oper, Operation, RangeStep, Stmt, StringPart, Type, Var};
 
 /// A struct used for registering and resolving aliases.
 /// 
@@ -13,53 +16,248 @@ use crate::ast::{AliasLeft, AliasRight, Expr, OpLit, Oper, Stmt, Var};
 /// because it is assumed that all insertions are handled sequentially as they appear in the source file.
 /// If this assumtion breaks, then this part will need to be reimplemented. 
 #[derive(Debug, Clone)]
-pub struct AliasResolver<'ast> {
-    current_defs: HashMap<AliasItem<'ast>, usize>,
-    alias_timeline: Vec<TimelineEntry<'ast>>,
-    scope_starts: Vec<usize>
+pub struct AliasResolver {
+    current_defs: HashMap<AliasItem, usize>,
+    alias_timeline: Vec<TimelineEntry>,
+    scope_starts: Vec<usize>,
+    record_table: Vec<AliasRecord> 
 }
 
-impl<'ast> AliasResolver<'ast> {
+impl AliasResolver {
     pub fn new() -> Self {
         Self {
             current_defs: HashMap::new(),
             alias_timeline: Vec::new(),
             scope_starts: Vec::new(),   // if empty, it is assumed that the current scope is global scope (ie. index 0)
+            record_table: Vec::new()
         }
     }
 
     /// Register and resolve all aliases in given statements.
-    pub fn resolve_aliases(&mut self, stmts: &'ast mut Vec<Stmt>) {
+    pub fn resolve_aliases(&mut self, stmts: &mut Vec<Stmt>) {
         for stmt in stmts {
-            match stmt {
-                Stmt::Alias { new, old, .. } => {
-                    let new_item = AliasItem::from(new);
-                    let old_item = AliasItem::from(old);
+            self.resolve_stmt(stmt);
+        }
+    }
 
-                    self.register_alias(new_item, old_item);
-                }
+    fn resolve_stmt(&mut self, stmt: &mut Stmt) {
+        match stmt {
+            Stmt::Alias { new, old, .. } => {
 
-                Stmt::Expr { expr, .. } => {
-                    match expr {
-                        Expr::Ident(name) => {
-                            // let item = AliasItem::from(*name);
-
-                            // if Some(resolved) = self.get_alias(&item) {
-                            //     *name = 
-                            // }
-                        }
-
-                        _ => todo!()
+                let new_item = AliasItem::from(&*new);
+                let old_item = match old {
+                    AliasRight::Expr(expr) => {
+                        self.resolve_expr(expr);
+                        AliasItem::from(&AliasRight::Expr(expr.clone()))
                     }
+
+                    _ => self.get_alias(&AliasItem::from(&*old)).unwrap_or(AliasItem::from(&*old))
+                };
+
+                self.register_alias(new_item, old_item);
+            }
+
+            Stmt::Expr { expr, .. } => self.resolve_expr(expr),
+
+            Stmt::Var   { name, ty, value, .. } |
+            Stmt::Const { name, ty, value, .. } => {
+                self.resolve_var_to_var(name);
+                
+                if let Some(ty) = ty {
+                    self.resolve_type(ty);
                 }
 
-                _ => todo!()
+                if let Some(expr) = value {
+                    self.resolve_expr(expr);
+                }
+            }
+
+            _ => todo!()
+        }
+    }
+
+    fn resolve_var_to_var(&self, name: &mut Var) {
+        if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
+            if resolved.kind == AliasKind::Ident {
+                *name = match resolved.frag {
+                    AliasFragment::Ident(id) => {
+                        Var::new(id.id(), name.span())
+                    },
+                    _ => unreachable!()
+                }
+            } else {
+                todo!("expected identifier, found {:?}", resolved.kind);
             }
         }
     }
 
-    fn register_alias(&mut self, mut new_item: AliasItem<'ast>, old_item: AliasItem<'ast>) {
-        let scope_start_idx = self.scope_starts.last().unwrap_or(&0);
+    fn resolve_expr(&mut self, expr: &mut Expr) {
+        match expr {
+            Expr::Block { stmts, tail, .. } => {
+                self.enter_scope();
+                
+                self.resolve_aliases(stmts);
+                if let Some(expr) = tail {
+                    self.resolve_expr(expr);
+                }
+
+                self.exit_scope();
+            }
+            
+            Expr::Ident(name) => if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
+                *expr = match resolved.frag {
+                    AliasFragment::Ident(resolved_name) => Expr::Ident(Var::new(resolved_name.id(), name.span())),
+                    AliasFragment::Expr(resolved_expr) => {
+                        let mut expr = resolved_expr.clone();
+                        *expr.span_mut() = name.span();
+
+                        expr
+                    }
+                    _ => todo!("expected expression found {:?}", resolved.kind)
+                };
+            }
+
+            Expr::String { parts, .. } => {
+                for part in parts {
+                    match part {
+                        StringPart::Expr(expr) => self.resolve_expr(expr),
+                        StringPart::Text(_) => ()
+                    }
+                }
+            }
+
+            Expr::Latex(..) => todo!(),
+
+            Expr::Not { expr, .. } |
+            Expr::UnaryPlus { expr, .. } |
+            Expr::Neg { expr, .. } |
+            Expr::Spread { expr, .. } => self.resolve_expr(expr),
+
+            // builtin binary operations
+            Expr::Or { lhs, rhs, ..} |
+            Expr::Xor { lhs, rhs, ..} |
+            Expr::And { lhs, rhs, ..} |
+            Expr::Eq { lhs, rhs, ..} |
+            Expr::NotEq { lhs, rhs, ..} |
+            Expr::Less { lhs, rhs, ..} |
+            Expr::Greater { lhs, rhs, ..} |
+            Expr::LessEq { lhs, rhs, ..} |
+            Expr::GreaterEq { lhs, rhs, ..} |
+            Expr::In { lhs, rhs, ..} |
+            Expr::Plus { lhs, rhs, ..} |
+            Expr::Minus { lhs, rhs, ..} |
+            Expr::PlusMinus { lhs, rhs, ..} |
+            Expr::MinusPlus { lhs, rhs, ..} |
+            Expr::Times { lhs, rhs, ..} |
+            Expr::Divide { lhs, rhs, ..} |
+            Expr::IntDivide { lhs, rhs, ..} |
+            Expr::Mod { lhs, rhs, ..} |
+            Expr::ModClass { lhs, rhs, ..} |
+            Expr::Exp { lhs, rhs, ..} => {
+                self.resolve_expr(lhs);
+                self.resolve_expr(rhs);
+            }
+
+            Expr::Array { rows, .. } => {
+                for row in rows {
+                    for expr in row {
+                        self.resolve_expr(expr);
+                    }
+                }
+            }
+
+            Expr::Range { lhs, rhs, step, .. } => {
+                match lhs {
+                    Endpoint::Inclusive(expr) |
+                    Endpoint::Exclusive(expr) => self.resolve_expr(expr),
+                    Endpoint::Unspecified => ()
+                }
+
+                match rhs {
+                    Endpoint::Inclusive(expr) |
+                    Endpoint::Exclusive(expr) => self.resolve_expr(expr),
+                    Endpoint::Unspecified => ()
+                }
+
+                match step {
+                    RangeStep::Discrete(expr) => self.resolve_expr(expr),
+                    RangeStep::Continuous => ()
+                }
+            }
+
+            Expr::Prefix { operator, operand, .. } => {
+                match operator {
+                    Operation::Ident(name) => if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
+                        *operator = match resolved.frag {
+                            AliasFragment::Ident(name) => Operation::Ident(name),
+                            AliasFragment::Oper(oper) => Operation::Oper(oper),
+                            AliasFragment::OpLit(oplit) => Operation::OpLit(oplit),
+                            _ => todo!("expected variable, operator, or operator literal but found expression")
+                        }
+                    }
+
+                    Operation::Oper(oper) => if let Some(resolved) = self.get_alias(&AliasItem::from(*oper)) {
+                        *operator = match resolved.frag {
+                            AliasFragment::Ident(name) => Operation::Ident(name),
+                            AliasFragment::Oper(oper) => Operation::Oper(oper),
+                            AliasFragment::OpLit(oplit) => Operation::OpLit(oplit),
+                            _ => todo!("expected variable, operator, or operator literal but found expression")
+                        }
+                    }
+
+                    Operation::OpLit(oplit) => {
+                        self.resolve_var_to_var(&mut oplit.name());
+                    }
+                };
+
+                self.resolve_expr(operand);
+            }
+
+            Expr::Infix { lhs, operator, rhs, .. } => {
+                self.resolve_expr(lhs);
+                
+                match operator {
+                    Operation::Ident(name) => if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
+                        *operator = match resolved.frag {
+                            AliasFragment::Ident(name) => Operation::Ident(name),
+                            AliasFragment::Oper(oper) => Operation::Oper(oper),
+                            AliasFragment::OpLit(oplit) => Operation::OpLit(oplit),
+                            _ => todo!("expected variable, operator, or operator literal but found expression")
+                        }
+                    }
+
+                    Operation::Oper(oper) => if let Some(resolved) = self.get_alias(&AliasItem::from(*oper)) {
+                        *operator = match resolved.frag {
+                            AliasFragment::Ident(name) => Operation::Ident(name),
+                            AliasFragment::Oper(oper) => Operation::Oper(oper),
+                            AliasFragment::OpLit(oplit) => Operation::OpLit(oplit),
+                            _ => todo!("expected variable, operator, or operator literal but found expression")
+                        }
+                    }
+
+                    Operation::OpLit(oplit) => {
+                        self.resolve_var_to_var(&mut oplit.name());
+                    }
+                };
+
+                self.resolve_expr(rhs);
+            }
+            
+            Expr::Int { .. } |
+            Expr::Real { .. } |
+            Expr::Imag { .. } |
+            Expr::Unit { .. } => (),
+
+            _ => todo!()
+        }
+    }
+
+    fn resolve_type(&mut self, ty: &mut Type) {
+
+    }
+
+    fn register_alias(&mut self, mut new_item: AliasItem, mut old_item: AliasItem) {
+        let scope_start_idx = &self.current_scope_start();
         let prev_idx = self.current_defs.get(&new_item);
 
         if let Some(idx) = prev_idx {
@@ -68,12 +266,10 @@ impl<'ast> AliasResolver<'ast> {
             }
         }
 
-        let old_item = self.get_alias(&old_item).unwrap_or(old_item);
+        // let old_item = self.get_alias(&old_item).unwrap_or(old_item);
         if old_item == new_item {
-            todo!("error: circular alias detected")
+            todo!("error: alias cycle detected")
         }
-
-        println!("OLD ITEM: {old_item:?}\nNEW ITEM: {new_item:?}");
 
         match (new_item.kind, old_item.kind) {
             (AliasKind::Ident, kind) => new_item.kind = kind,
@@ -86,45 +282,76 @@ impl<'ast> AliasResolver<'ast> {
         let i = self.alias_timeline.len();
         self.alias_timeline.push(TimelineEntry {
             old_item,
-            prev_def: prev_idx.copied()
+            prev_def: prev_idx.copied(),
+            new_item: new_item.clone()
         });
 
+        // self.insert_or_update_map(new_item, i);
         self.current_defs.insert(new_item, i);
     }
 
-    fn get_alias(&self, item: &AliasItem<'ast>) -> Option<AliasItem<'ast>> {
+    fn get_alias(&self, item: &AliasItem) -> Option<AliasItem> {
         self.current_defs
             .get(&item)
-            .map(|i| self.alias_timeline[*i].old_item)
+            .map(|i| self.alias_timeline[*i].old_item.clone())
     }
+
+    fn enter_scope(&mut self) {
+        self.scope_starts.push(self.alias_timeline.len());
+    }
+
+    fn exit_scope(&mut self) {
+        self.alias_timeline.drain(self.current_scope_start()..)
+            .rev()
+            .for_each(|entry| {
+                self.current_defs.remove(&entry.new_item);
+
+                // needs to be removed prior to update the kind of the key item
+                if let Some(i) = entry.prev_def {
+                    self.current_defs.insert(entry.new_item, i);
+                }
+            });
+        self.scope_starts.pop();
+    }
+
+    fn current_scope_start(&self) -> usize {
+        *self.scope_starts.last().unwrap_or(&0)
+    }
+
+    // Removes and then inserts key back to map so that any fields not part of Eq or Hash can be updated.
+    // fn insert_or_update_map(&mut self, new_item: AliasItem<'ast>, i: usize) {
+    //     self.current_defs.remove(&new_item); // has to be removed so that the key is updated
+    //     self.current_defs.insert(new_item, i);
+    // }
 }
 
 #[derive(Debug, Clone)]
-pub struct TimelineEntry<'ast> {
-    old_item: AliasItem<'ast>,
-    prev_def: Option<usize>     // index of previous alias of this symbol (ie. shadowed alias)
+pub struct TimelineEntry {
+    old_item: AliasItem,
+    prev_def: Option<usize>,
+    new_item: AliasItem
 }
 
-#[derive(Debug, Clone, Copy, Eq)]
-pub struct AliasItem<'ast> {
-    frag: AliasFragment<'ast>,
+#[derive(Debug, Clone, Eq)]
+pub struct AliasItem {
+    frag: AliasFragment,
     kind: AliasKind
 }
 
-impl<'ast> PartialEq for AliasItem<'ast> {
+impl PartialEq for AliasItem {
     fn eq(&self, other: &Self) -> bool {
         self.frag == other.frag
     }
 }
 
-impl<'ast> Hash for AliasItem<'ast> {
+impl Hash for AliasItem {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.frag.hash(state)
     }
 }
 
-impl<'ast> From<&'ast mut AliasLeft> for AliasItem<'ast> {
-    fn from(value: &'ast mut AliasLeft) -> Self {
+impl From<&AliasLeft> for AliasItem {
+    fn from(value: &AliasLeft) -> Self {
         match value {
             AliasLeft::Ident(ident) => AliasItem {
                 frag: AliasFragment::Ident(*ident),
@@ -139,8 +366,8 @@ impl<'ast> From<&'ast mut AliasLeft> for AliasItem<'ast> {
     }
 }
 
-impl<'ast> From<&'ast mut AliasRight> for AliasItem<'ast> {
-    fn from(value: &'ast mut AliasRight) -> Self {
+impl From<&AliasRight> for AliasItem {
+    fn from(value: &AliasRight) -> Self {
         match value {
             AliasRight::Ident(ident) => AliasItem {
                 frag: AliasFragment::Ident(*ident),
@@ -158,14 +385,14 @@ impl<'ast> From<&'ast mut AliasRight> for AliasItem<'ast> {
             },
 
             AliasRight::Expr(expr) => AliasItem {
-                frag: AliasFragment::Expr(&*expr),
+                frag: AliasFragment::Expr(expr.clone()),
                 kind: AliasKind::Expr
             }
         }
     }
 }
 
-impl<'ast> From<Var> for AliasItem<'ast> {
+impl From<Var> for AliasItem {
     fn from(value: Var) -> Self {
         AliasItem {
             frag: AliasFragment::Ident(value),
@@ -174,7 +401,7 @@ impl<'ast> From<Var> for AliasItem<'ast> {
     }
 }
 
-impl<'ast> From<Oper> for AliasItem<'ast> {
+impl From<Oper> for AliasItem {
     fn from(value: Oper) -> Self {
         AliasItem {
             frag: AliasFragment::Oper(value),
@@ -183,15 +410,15 @@ impl<'ast> From<Oper> for AliasItem<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq)]
-pub enum AliasFragment<'ast> {
+#[derive(Debug, Clone, Eq)]
+pub enum AliasFragment {
     Ident(Var),
     Oper(Oper),
     OpLit(OpLit),
-    Expr(&'ast Expr)
+    Expr(Expr)
 }
 
-impl<'ast> Hash for AliasFragment<'ast> {
+impl Hash for AliasFragment {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         discriminant(self).hash(state);
 
@@ -204,7 +431,7 @@ impl<'ast> Hash for AliasFragment<'ast> {
     }
 }
 
-impl<'ast> PartialEq for AliasFragment<'ast> {
+impl PartialEq for AliasFragment {
     fn eq(&self, other: &Self) -> bool {
         use AliasFragment::*;
 
@@ -218,9 +445,44 @@ impl<'ast> PartialEq for AliasFragment<'ast> {
     }
 }
 
+impl AliasFragment {
+    fn get_var(&self) -> Option<Var> {
+        match self {
+            Self::Ident(name) => Some(*name),
+            _ => None
+        }
+    }
+
+    fn get_op(&self) -> Option<Oper> {
+        match self {
+            Self::Oper(op) => Some(*op),
+            _ => None
+        }
+    }
+
+    fn get_oplit(&self) -> Option<OpLit> {
+        match self {
+            Self::OpLit(oplit) => Some(*oplit),
+            _ => None
+        }
+    }
+
+    fn get_expr(&self) -> Option<&Expr> {
+        match self {
+            Self::Expr(expr) => Some(expr),
+            _ => None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AliasKind {
     Ident,
     Oper,
     Expr
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AliasRecord {
+
 }

@@ -430,7 +430,6 @@ impl Expr {
     }
 }
 
-// TODO: symbol id
 type SymbolId = usize;
 
 /// Represents a name. 
@@ -728,7 +727,7 @@ pub enum RangeStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Operation {
     Ident(Var),
-    Custom(Oper),
+    Oper(Oper),
     OpLit(OpLit),
 }
 

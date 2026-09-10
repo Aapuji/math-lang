@@ -1,2 +1,2 @@
-alias x for (1+2);
-alias /? for x;
+alias x for y;
+alias y for x;

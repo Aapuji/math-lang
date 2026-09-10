@@ -38,18 +38,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     let interner = interner.into_resolver();
 
     println!("{:#?}", tokens);
-    println!("\n== AST ==");
 
     let parser = Parser::new(tokens);
     let mut stmts = parser.parse(&mut source_map, &interner);
 
-    // println!("{:#?}\n", stmts);
 
     let mut alias_resolver = AliasResolver::new();
     alias_resolver.resolve_aliases(&mut stmts);
     
     println!("== ALIAS RESOLVER ==\n{:#?}\n", alias_resolver);
     // println!("== ALIASED AST ==\n{:#?}", stmts);
+
+    println!("\n== AST ==\n{:#?}\n", stmts);
     
     Ok(())
 }

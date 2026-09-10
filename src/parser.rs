@@ -1024,7 +1024,7 @@ impl Parser {
     }
 
     fn parse_expr(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
-        if let TokenKind::LBrace = self.peek_kind() {
+        if let TokenKind::LBrace = self.current_kind() {
             self.parse_block(source_map, interner)
         } else {
             self.parse_or(source_map, interner)
@@ -1740,7 +1740,7 @@ impl Parser {
                     Expr::Infix {
                         span: Span::new($lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
                         lhs: Box::new($lhs),
-                        operator: Operation::Custom(Oper::try_from(operator).unwrap()),
+                        operator: Operation::Oper(Oper::try_from(operator).unwrap()),
                         rhs: Box::new(rhs)
                     }
                 } else {
@@ -1766,7 +1766,7 @@ impl Parser {
 
                     Expr::Prefix {
                         span: Span::new(operator.span().start(), operand.span().end(), operand.span().source_id()),
-                        operator: Operation::Custom(Oper::try_from(operator).unwrap()),
+                        operator: Operation::Oper(Oper::try_from(operator).unwrap()),
                         operand: Box::new(operand)
                     }
                 }
