@@ -5,7 +5,7 @@ use std::mem::discriminant;
 // TODO: rewrite without references
 // TODO: Have a phase (or maybe in this phase when resolving a prefix or infix custom op) to reassociate resolved expressions
 
-use crate::ast::{AliasLeft, AliasRight, Endpoint, Expr, OpLit, Oper, Operation, RangeStep, Stmt, StringPart, Type, Var};
+use crate::{ast::{AliasLeft, AliasRight, Endpoint, Expr, OpLit, Oper, Operation, RangeStep, Stmt, StringPart, Type, Var}, source::Span};
 
 /// A struct used for registering and resolving aliases.
 /// 
@@ -43,7 +43,6 @@ impl AliasResolver {
     fn resolve_stmt(&mut self, stmt: &mut Stmt) {
         match stmt {
             Stmt::Alias { new, old, .. } => {
-
                 let new_item = AliasItem::from(&*new);
                 let old_item = match old {
                     AliasRight::Expr(expr) => {
@@ -51,7 +50,7 @@ impl AliasResolver {
                         AliasItem::from(&AliasRight::Expr(expr.clone()))
                     }
 
-                    _ => self.get_alias(&AliasItem::from(&*old)).unwrap_or(AliasItem::from(&*old))
+                    _ => self.get_alias_from_right_and_record(&*old)
                 };
 
                 self.register_alias(new_item, old_item);
@@ -76,15 +75,34 @@ impl AliasResolver {
         }
     }
 
-    fn resolve_var_to_var(&self, name: &mut Var) {
+    /// Gets corresponding `AliasItem` from the given `AliasRight` and records it in the record table if found or otherwise defaults to inputted `AliasRight` converted to an `AliasItem`.
+    fn get_alias_from_right_and_record(&mut self, right: &AliasRight) -> AliasItem {
+        let item = AliasItem::from(right);
+        self.get_alias(&item)
+            .inspect(|it| {
+                self.record_table.push(AliasRecord {
+                    usage_span: item.frag.span(),
+                    def_span: it.frag.span()
+                });
+            })
+            .unwrap_or(AliasItem::from(right))
+    }
+
+    fn resolve_var_to_var(&mut self, name: &mut Var) {
         if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
             if resolved.kind == AliasKind::Ident {
-                *name = match resolved.frag {
+                let new_name = match resolved.frag {
                     AliasFragment::Ident(id) => {
                         Var::new(id.id(), name.span())
                     },
                     _ => unreachable!()
-                }
+                };
+
+                self.record_table.push(AliasRecord {
+                    usage_span: name.span(),
+                    def_span: new_name.span()
+                });
+                *name = new_name;
             } else {
                 todo!("expected identifier, found {:?}", resolved.kind);
             }
@@ -105,16 +123,26 @@ impl AliasResolver {
             }
             
             Expr::Ident(name) => if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
-                *expr = match resolved.frag {
-                    AliasFragment::Ident(resolved_name) => Expr::Ident(Var::new(resolved_name.id(), name.span())),
+                let (new_expr, def_span) = match resolved.frag {
+                    AliasFragment::Ident(resolved_name) => {
+                        (Expr::Ident(Var::new(resolved_name.id(), name.span())), resolved_name.span())
+                    }
+
                     AliasFragment::Expr(resolved_expr) => {
                         let mut expr = resolved_expr.clone();
+                        let span = expr.span();
                         *expr.span_mut() = name.span();
 
-                        expr
+                        (expr, span)
                     }
                     _ => todo!("expected expression found {:?}", resolved.kind)
                 };
+
+                self.record_table.push(AliasRecord {
+                    usage_span: name.span(),
+                    def_span
+                });
+                *expr = new_expr;
             }
 
             Expr::String { parts, .. } => {
@@ -188,21 +216,33 @@ impl AliasResolver {
             Expr::Prefix { operator, operand, .. } => {
                 match operator {
                     Operation::Ident(name) => if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
-                        *operator = match resolved.frag {
+                        let operation = match resolved.frag {
                             AliasFragment::Ident(name) => Operation::Ident(name),
                             AliasFragment::Oper(oper) => Operation::Oper(oper),
                             AliasFragment::OpLit(oplit) => Operation::OpLit(oplit),
                             _ => todo!("expected variable, operator, or operator literal but found expression")
-                        }
+                        };
+
+                        self.record_table.push(AliasRecord {
+                            usage_span: name.span(),
+                            def_span: operation.span()
+                        });
+                        *operator = operation;
                     }
 
                     Operation::Oper(oper) => if let Some(resolved) = self.get_alias(&AliasItem::from(*oper)) {
-                        *operator = match resolved.frag {
+                        let operation = match resolved.frag {
                             AliasFragment::Ident(name) => Operation::Ident(name),
                             AliasFragment::Oper(oper) => Operation::Oper(oper),
                             AliasFragment::OpLit(oplit) => Operation::OpLit(oplit),
                             _ => todo!("expected variable, operator, or operator literal but found expression")
-                        }
+                        };
+
+                        self.record_table.push(AliasRecord {
+                            usage_span: oper.span(),
+                            def_span: operation.span()
+                        });
+                        *operator = operation;
                     }
 
                     Operation::OpLit(oplit) => {
@@ -218,21 +258,33 @@ impl AliasResolver {
                 
                 match operator {
                     Operation::Ident(name) => if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
-                        *operator = match resolved.frag {
+                        let operation = match resolved.frag {
                             AliasFragment::Ident(name) => Operation::Ident(name),
                             AliasFragment::Oper(oper) => Operation::Oper(oper),
                             AliasFragment::OpLit(oplit) => Operation::OpLit(oplit),
                             _ => todo!("expected variable, operator, or operator literal but found expression")
-                        }
+                        };
+
+                        self.record_table.push(AliasRecord {
+                            usage_span: name.span(),
+                            def_span: operation.span()
+                        });
+                        *operator = operation;
                     }
 
                     Operation::Oper(oper) => if let Some(resolved) = self.get_alias(&AliasItem::from(*oper)) {
-                        *operator = match resolved.frag {
+                        let operation = match resolved.frag {
                             AliasFragment::Ident(name) => Operation::Ident(name),
                             AliasFragment::Oper(oper) => Operation::Oper(oper),
                             AliasFragment::OpLit(oplit) => Operation::OpLit(oplit),
                             _ => todo!("expected variable, operator, or operator literal but found expression")
-                        }
+                        };
+
+                        self.record_table.push(AliasRecord {
+                            usage_span: oper.span(),
+                            def_span: operation.span()
+                        });
+                        *operator = operation;
                     }
 
                     Operation::OpLit(oplit) => {
@@ -290,6 +342,7 @@ impl AliasResolver {
         self.current_defs.insert(new_item, i);
     }
 
+    /// Gets the corresponding `AliasItem` registered for the given item, or outputs `None` if the item does not exist.
     fn get_alias(&self, item: &AliasItem) -> Option<AliasItem> {
         self.current_defs
             .get(&item)
@@ -473,6 +526,15 @@ impl AliasFragment {
             _ => None
         }
     }
+
+    fn span(&self) -> Span {
+        match self {
+            Self::Ident(name) => name.span(),
+            Self::Oper(op) => op.span(),
+            Self::OpLit(oplit) => oplit.span(),
+            Self::Expr(expr) => expr.span()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -484,5 +546,6 @@ pub enum AliasKind {
 
 #[derive(Debug, Clone, Copy)]
 pub struct AliasRecord {
-
+    usage_span: Span,
+    def_span: Span
 }

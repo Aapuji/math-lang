@@ -52,6 +52,26 @@ impl Span {
 
 }
 
+impl PartialOrd for Span {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.source_id != other.source_id {
+            None
+        } else {
+            if self.start == other.start {
+                Some(std::cmp::Ordering::Equal)
+            } else if self.start < other.start {
+                Some(std::cmp::Ordering::Less)
+            } else if self.end < other.end {
+                Some(std::cmp::Ordering::Less)
+            } else if self.end == other.end {
+                Some(std::cmp::Ordering::Equal)
+            } else {
+                Some(std::cmp::Ordering::Greater)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
     Text

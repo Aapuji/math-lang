@@ -1,2 +1,3 @@
-alias x for y;
-alias y for x;
+alias b for a;
+alias c for b;
+alias d for c;

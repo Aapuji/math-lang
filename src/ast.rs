@@ -731,6 +731,16 @@ pub enum Operation {
     OpLit(OpLit),
 }
 
+impl Operation {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Ident(name) => name.span(),
+            Self::Oper(op) => op.span(),
+            Self::OpLit(oplit) => oplit.span()
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OpLit {
     name: Var,
