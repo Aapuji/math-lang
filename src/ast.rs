@@ -554,13 +554,21 @@ impl Let {
     pub fn new(bindings: Vec<Binding>, kind: LetKind, value: Option<Expr>) -> Self {
         Self { bindings, kind, value }
     }
+
+    pub fn bindings_mut(&mut self) -> &mut Vec<Binding> {
+        &mut self.bindings
+    }
+
+    pub fn value_mut(&mut self) -> &mut Option<Expr> {
+        &mut self.value
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LetKind {
-    Assign,
-    Define,
-    Declare
+    Assign, // assign symbols to value
+    Define, // define symbols via constraint
+    Declare // declare existence of symbols
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -590,6 +598,26 @@ impl FnHeader {
         span: Span
     ) -> Self {
         Self { name, ty_args, args, kwargs, ty, span }
+    }
+
+    pub fn name_mut(&mut self) -> &mut Var {
+        &mut self.name
+    }
+
+    pub fn ty_args_mut(&mut self) -> &mut Vec<Generic> {
+        &mut self.ty_args
+    }
+
+    pub fn args_mut(&mut self) -> &mut Vec<(Var, Option<Type>)> {
+        &mut self.args
+    }
+
+    pub fn kwargs_mut(&mut self) -> &mut Vec<(Var, Option<Type>)> {
+        &mut self.kwargs
+    }
+
+    pub fn ty_mut(&mut self) -> &mut Option<Type> {
+        &mut self.ty
     }
 
     pub fn span(&self) -> Span {

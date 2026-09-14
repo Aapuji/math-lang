@@ -5,7 +5,7 @@ use std::mem::discriminant;
 // TODO: rewrite without references
 // TODO: Have a phase (or maybe in this phase when resolving a prefix or infix custom op) to reassociate resolved expressions
 
-use crate::{ast::{AliasLeft, AliasRight, Endpoint, Expr, OpLit, Oper, Operation, RangeStep, Stmt, StringPart, Type, Var}, source::Span};
+use crate::{ast::{AliasLeft, AliasRight, Binding, Endpoint, Expr, FnHeader, Generic, Let, OpLit, Oper, Operation, RangeStep, Shape, ShapeSpec, Stmt, StringPart, Type, Var, Variant}, source::Span};
 
 /// A struct used for registering and resolving aliases.
 /// 
@@ -71,7 +71,142 @@ impl AliasResolver {
                 }
             }
 
-            _ => todo!()
+            Stmt::Let { def, .. } => {
+                for binding in def.bindings_mut() {
+                    self.resolve_binding(binding);
+                }
+
+                if let Some(value) = def.value_mut() {
+                    self.resolve_expr(value);
+                }
+            }
+
+            Stmt::Fn { header, value, .. } => {
+                self.resolve_header(header);
+                self.resolve_expr(value);
+            }
+
+            Stmt::Sym { name, args, ty, .. } => {
+                self.resolve_var_to_var(name);
+                for (arg, ty) in args {
+                    self.resolve_var_to_var(arg);
+                    
+                    if let Some(ty) = ty {
+                        self.resolve_type(ty);
+                    }
+                }
+
+                if let Some(ty) = ty {
+                    self.resolve_type(ty);
+                }
+            }
+
+            Stmt::Type { name, ty_args, def, .. } => {
+                self.resolve_var_to_var(name);
+                self.resolve_generics(ty_args);
+                self.resolve_type(def);
+            }
+
+            Stmt::Enum { name, ty_args, variants, .. } => {
+                self.resolve_var_to_var(name);
+                self.resolve_generics(ty_args);
+                
+                for variant in variants {
+                    match variant {
+                        Variant::Const(name) => self.resolve_var_to_var(name),
+                        Variant::Tuple(types) => for ty in types {
+                            self.resolve_type(ty);
+                        }
+                        Variant::Record(fields) => for (field, ty) in fields {
+                            self.resolve_var_to_var(field);
+                            self.resolve_type(ty);
+                        }
+                    }
+                }
+            }
+
+            Stmt::Struct { name, ty_args, fields, .. } => {
+                self.resolve_var_to_var(name);
+                self.resolve_generics(ty_args);
+                for (field, ty) in fields {
+                    self.resolve_var_to_var(field);
+                    self.resolve_type(ty);
+                }
+            }
+        }
+    }
+
+    fn resolve_binding(&mut self, binding: &mut Binding) {
+        match binding {
+            Binding::Name(name, ty) => {
+                self.resolve_var_to_var(name);
+                if let Some(ty) = ty {
+                    self.resolve_type(ty);
+                }
+            }
+
+            Binding::Fn(header) |
+            Binding::Call(header) => self.resolve_header(header)
+        }
+    }
+
+    fn resolve_header(&mut self, header: &mut FnHeader) {
+        self.resolve_var_to_var(header.name_mut());
+        self.resolve_generics(header.ty_args_mut());
+        
+        for (name, ty) in header.args_mut() {
+            self.resolve_var_to_var(name);
+            if let Some(ty) = ty {
+                self.resolve_type(ty);
+            }
+        }
+
+        for (name, ty) in header.kwargs_mut() {
+            self.resolve_var_to_var(name);
+            if let Some(ty) = ty {
+                self.resolve_type(ty);
+            }
+        }
+
+        if let Some(ty) = header.ty_mut() {
+            self.resolve_type(ty);
+        }
+    }
+    
+    fn resolve_type(&mut self, ty: &mut Type) {
+        match ty {
+            Type::Unit { .. } => (),
+            Type::Named(name) => self.resolve_var_to_var(name),
+            Type::Array { shape, ty, .. } => {
+                match shape {
+                    Shape::Empty | Shape::Dynamic => (),
+                    Shape::Specified(specs) => for spec in specs {
+                        match spec {
+                            ShapeSpec::Known(expr) => self.resolve_expr(expr),
+                            ShapeSpec::Unknown => ()
+                        }
+                    }
+                }
+
+                self.resolve_type(ty);
+            }
+
+            Type::Tuple { types, .. } => {
+                for ty in types {
+                    self.resolve_type(ty);
+                }
+            }
+
+            Type::Exponent { ty, exp, .. } => {
+                self.resolve_type(ty);
+                self.resolve_expr(exp);
+            }
+        }
+    }
+
+    fn resolve_generics(&mut self, generics: &mut Vec<Generic>) {
+        for Generic { name } in generics {
+            self.resolve_var_to_var(name);
         }
     }
 
@@ -251,6 +386,18 @@ impl AliasResolver {
                 };
 
                 self.resolve_expr(operand);
+
+                // TODO: reduce custom prefix and infix AST nodes into  
+                // Thoughts: perhaps allow for associativity and precedence in operator literals
+                /* Like maybe
+                    `f`
+                    `f:4`
+                    `@lassoc f`
+                    `@lassoc f:4`
+                    `@rassoc f`
+                    `@rassoc f:4`
+                */
+                
             }
 
             Expr::Infix { lhs, operator, rhs, .. } => {
@@ -302,10 +449,6 @@ impl AliasResolver {
 
             _ => todo!()
         }
-    }
-
-    fn resolve_type(&mut self, ty: &mut Type) {
-
     }
 
     fn register_alias(&mut self, mut new_item: AliasItem, mut old_item: AliasItem) {
