@@ -36,8 +36,23 @@ impl<'t> Lexer<'t> {
             if let Some(&LexerMode::String(str_start, prefix)) = self.mode_stack.last() {
                 self.continue_string(str_start, &mut tokens, prefix);
             } else if let Some((i, ch)) = self.ich {
-                if ch.is_ascii_digit() {
-                    self.lex_number((i, ch), &mut tokens);
+                if ch == '0' && matches!(self.text.peek(), Some(&(_, 'b'|'B'))) {
+                    let ich = (i, ch);
+                    self.next(); 
+                    self.next();
+                    self.lex_number(ich, 2, &mut tokens);
+                } else if ch == '0' && matches!(self.text.peek(), Some(&(_, 'o'|'O'))) {
+                    let ich = (i, ch);
+                    self.next();
+                    self.next();
+                    self.lex_number(ich, 8, &mut tokens);
+                } else if ch == '0' && matches!(self.text.peek(), Some(&(_, 'x'|'X'))) {
+                    let ich = (i, ch);
+                    self.next();
+                    self.next();
+                    self.lex_number(ich, 16, &mut tokens);
+                } else if ch.is_ascii_digit() {
+                    self.lex_number((i, ch), 10, &mut tokens);
                 } else if ch == '"' {
                     self.lex_string((i, ch), &mut tokens, StringPrefix::None);
                 } else if ch == 'f' && matches!(self.text.peek(), Some(&(_, '"'))) {
@@ -178,6 +193,15 @@ impl<'t> Lexer<'t> {
                         TokenKind::Eq,
                         Span::new(i, i + 1, self.source)));
                     self.next();
+                } else if ch == '@' && matches!(self.text.peek(), Some(&(_, c)) if c.is_identifier_start()) {
+                    let ich = (i, ch);
+                    self.next();
+
+                    if let Some(new_ich) = self.ich {
+                        self.lex_ident(new_ich, &mut tokens, source_map, interner);
+                        tokens.last_mut().unwrap().set_kind(TokenKind::MacroInvoke);
+                        tokens.last_mut().unwrap().set_span_start(ich.0);
+                    }
                 } else if ch == '@' && !matches!(self.text.peek(), Some(&(_, c)) if OPERATOR_CHARSET.contains(c)) {
                     tokens.push(Token::new(
                         TokenKind::At,
@@ -247,20 +271,38 @@ impl<'t> Lexer<'t> {
         return tokens;
     }
 
-    fn lex_number(&mut self, ich: (usize, char), tokens: &mut Vec<Token>) {
+    fn lex_number(&mut self, ich: (usize, char), base: u32, tokens: &mut Vec<Token>) {
         let start = ich.0;
         let mut end = start + 1;
+
+        const INLINE_MAX: u32 = 0x7FFF_FFFF;
+        let mut inline: u32 = 0;
+        let mut has_overflowed = false;
+
         let mut kind = TokenKind::Int;
 
         loop {
-            match self.next() {
-                Some((i, ch)) if ch.is_ascii_digit() || ch == '_' => {
+            match self.ich {
+                Some((i, ch)) if ch.is_digit(base) || ch == '_' => {
                     end = i + 1;
+
+                    if kind == TokenKind::Int && !has_overflowed && ch != '_' {
+                        let digit = ch.to_digit(base).expect("incorrect digit for given base literal");
+
+                        if let Some(next_val) = inline.checked_mul(base).and_then(|n| n.checked_add(digit)) {
+                            if next_val > INLINE_MAX {
+                                has_overflowed = true;
+                            } else {
+                                inline = next_val;
+                            }
+                        } else {
+                            has_overflowed = true;
+                        }
+                    }
                 }
 
                 Some((i, '.')) if kind == TokenKind::Int => {
                     match self.text.peek() {
-                        // decimal
                         Some((i, ch)) if ch.is_ascii_digit() => {
                             end = i + 1;
                             kind = TokenKind::Real;
@@ -315,10 +357,24 @@ impl<'t> Lexer<'t> {
 
                 None => break
             }
+
+            self.next();
+        }
+
+        if has_overflowed {
+            inline = 0x8000_0000;
+
+            if let TokenKind::Int = kind {
+                inline |= base;
+            }
+        }
+
+        if kind != TokenKind::Int && base != 10 {
+            todo!("Non-decimal bases can only be used with integer literals.");
         }
 
         let span = Span::new(start, end, self.source);
-        tokens.push(Token::new(kind, span));
+        tokens.push(Token::with_payload(kind, inline, span));
     }
 
     fn lex_string(&mut self, ich: (usize, char), tokens: &mut Vec<Token>, prefix: StringPrefix) {

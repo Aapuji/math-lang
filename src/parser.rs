@@ -671,7 +671,7 @@ impl Parser {
                 let bt = self.current();
                 self.advance();
 
-                let oplit = self.parse_operator_literal(bt.span().start());
+                let oplit = self.parse_operator_literal(bt.span().start(), source_map, interner);
 
                 AliasRight::OpLit(oplit)
             }
@@ -936,14 +936,14 @@ impl Parser {
                 self.expect(TokenKind::Comma);
 
                 let mut types = if let Type::Exponent { ty: lhs, exp, span: exp_span} = &ty {
-                    if let Expr::Int {  value, .. } = Box::as_ref(exp) {
-                        if value > &Self::MAX_ARGS {
+                    if let Expr::Int {  value: AstInt::Small(value), .. } = Box::as_ref(exp) {
+                        if *value > Self::MAX_ARGS as u32 {
                             todo!("too high of a type exponent")
                         } else if value < &0 {
                             todo!("type exponents must be a natural number")
                         } else {
                             let mut types = vec![];
-                            for _ in 0..usize::try_from(value).unwrap() {
+                            for _ in 0..*value {
                                 let mut lhs = *lhs.to_owned();
                                 *lhs.span_mut() = *exp_span;
 
@@ -970,13 +970,13 @@ impl Parser {
                     let ty = self.parse_type(source_map, interner);
 
                     if let Type::Exponent { ty: lhs, exp, span: exp_span } = &ty {
-                        if let Expr::Int {  value, .. } = Box::as_ref(exp) {
-                            if value > &Self::MAX_ARGS {
+                        if let Expr::Int {  value: AstInt::Small(value), .. } = Box::as_ref(exp) {
+                            if *value > Self::MAX_ARGS as u32 {
                                 todo!("too high of a type exponent")
-                            } else if value < &0 {
+                            } else if *value < 0 {
                                 todo!("type exponents must be a natural number")
                             } else {
-                                for _ in 0..usize::try_from(value).unwrap() {
+                                for _ in 0..*value {
                                     let mut lhs = *lhs.to_owned();
                                     *lhs.span_mut() = *exp_span;
 
@@ -1714,7 +1714,7 @@ impl Parser {
                         rhs: Box::new(rhs)
                     }
                 } else if let Some(bt) = self.take(TokenKind::Backtick) {
-                    let operator = self.parse_operator_literal(bt.span().start());                      
+                    let operator = self.parse_operator_literal(bt.span().start(), source_map, interner);                      
                     let rhs = if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                         unary
                     } else {
@@ -1808,7 +1808,7 @@ impl Parser {
                 let Some(bt) = self.take(TokenKind::Backtick)
                 else { todo!("expected backtick") };
 
-                let operator = self.parse_operator_literal(bt.span().start());
+                let operator = self.parse_operator_literal(bt.span().start(), source_map, interner);
                 let operand = if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                     unary
                 } else {
@@ -1836,16 +1836,50 @@ impl Parser {
     }
 
     /// Backtick must have been consumed before calling this function
-    fn parse_operator_literal(&mut self, span_start: usize) -> OpLit {
-        if let Some(name) = self.take(TokenKind::Ident) {
-            let name = name.try_into().unwrap();
-            let Some(bt) = self.require(TokenKind::Backtick)
-            else { todo!("expected backtick") };
+    fn parse_operator_literal(&mut self, span_start: usize, source_map: &SourceMap, interner: &ResolvedInterner) -> OpLit {
+        // let assoc = if let Some(minvoke) = self.take(TokenKind::MacroInvoke) {
+        //     match interner.resolve(&Spur::try_from_usize(minvoke.payload() as usize).unwrap()) {
+        //         "lassoc" => Assoc::Left,
+        //         "rassoc" => Assoc::Right,
+        //         _ => todo!("expected only @lassoc or @rassoc in associativity specifier")
+        //     }
+        // } else {
+        //     Assoc::None
+        // };
 
-            OpLit::new(name, Span::new(span_start, bt.span().end(),  bt.span().source_id()))
-        } else {
-            todo!("report error for invalid operator literal")
-        }
+        // let name = if let Some(name) = self.require(TokenKind::Ident) {
+        //     let name = name.try_into().unwrap();
+        //     let Some(bt) = self.require(TokenKind::Backtick)
+        //     else { todo!("expected backtick") };
+
+        //     name
+        // } else {
+        //     todo!("invalid operator literal; expected identifier")
+        // };
+
+        // let prec = if self.accept_op(source_map, ":") {
+        //     let Some(plvl) = self.require(TokenKind::Int)
+        //     else { todo!("expected natural for precedence") };
+
+        //     Prec::try_from(plvl.payload());
+        // };
+
+        // let Some(name) = self.require(TokenKind::Ident).map(|t| t.try_into().unwrap())
+        // else { todo!("invalid operator literal; expected identifier") };
+
+
+
+
+        todo!()
+        // if let Some(name) = self.take(TokenKind::Ident) {
+        //     let name = name.try_into().unwrap();
+        //     let Some(bt) = self.require(TokenKind::Backtick)
+        //     else { todo!("expected backtick") };
+
+        //     // OpLit::new(name, Span::new(span_start, bt.span().end(),  bt.span().source_id()))
+        // } else {
+        //     todo!("report error for invalid operator literal")
+        // }
     }
 
     /// Attempts to parse a built-in unary expression. If it succeeds, it outputs the expression. If it cannot find a built-in unary operator, it returns None.
@@ -2091,14 +2125,29 @@ impl Parser {
     fn parse_primary(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {        
         match self.current_kind() {
             TokenKind::Int => {
-                let number = self.current().get_lexeme(source_map).replace('_', "");
-                let expr = Expr::Int {
-                    value: Integer::parse(number).unwrap().into(),
-                    span: self.current().span()
-                };
+                let token = self.current();
                 self.advance();
 
-                expr
+                // Inline Integer
+                if token.payload() & 0x8000_0000 == 0 {
+                    Expr::Int {
+                        value: AstInt::Small(token.payload() & 0x7FFF_FFFF),
+                        span: token.span()
+                    }
+                // Payload stores base
+                } else {
+                    let base = token.payload() & 0x7FFF_FFFF;
+                    let number = if base != 10 {
+                        &token.get_lexeme(source_map).replace('_', "")[2..]
+                    } else {
+                        &token.get_lexeme(source_map).replace('_', "")
+                    };
+
+                    Expr::Int {
+                        value: AstInt::Large(Integer::parse_radix(number, base as i32).unwrap().into()),
+                        span: token.span()
+                    }
+                }
             }
 
             TokenKind::Real => {
@@ -2540,16 +2589,19 @@ xor                             L
 and                             L
 not                             _
 == != < > <= >= \in \notin      L
+ranges                          _
 + - +- -+                       L
 * / // % %%                     L
 ^                               R
-user (like `1:f`)               N
-unary                           _
-index                           L
-call                            L
+@                               R
+user (like `f`)                 N
+unary                           N
+index call access               L
+{}                              N
 ()                              N
 HIGHEST                 
 */
+
 // #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 // enum ExprPrec {
 //     Lambda,

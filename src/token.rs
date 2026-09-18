@@ -19,6 +19,8 @@ pub enum TokenKind {
 
     DocComment,
 
+    MacroInvoke,
+
     Operator, // any operator
     CodeSpliceIndicator,
     
@@ -100,10 +102,12 @@ pub enum LexerErrorKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// The `payload` field is a generic payload. For tokens that do not use it, it does not add any extra memory usage.
 ///   - Identifiers and operators use it as an Option<Spur> as the index into the Rodeo string interning system
+///   - Strings use it to store the string prefix
+///   - Integers either store the whole value if it fits in a u31 with highest bit 0, or sets highest bit and then encodes the base of the number.
 ///   - perhaps in the future, optimizations can be made to put small integers or floats, etc into this to make it faster
 pub struct Token {
     kind: TokenKind,
-    payload: u32,       // A generic payload
+    payload: u32,  // A generic payload
     span: Span
 }
 
@@ -301,6 +305,10 @@ impl ActiveInterner {
         rodeo.get_or_intern_static("->");
         let oend = rodeo.get_or_intern_static("=>");
 
+        // these are only used inside an operator literal (@lassoc/@rassoc)
+        rodeo.get_or_intern_static("lassoc");
+        rodeo.get_or_intern_static("rassoc");
+
         Self {
             rodeo,
             keywords,
@@ -340,6 +348,9 @@ pub struct ResolvedInterner {
 
 impl ResolvedInterner {
     // add wrapper methods for any methods of RodeoResolver as needed
+    pub fn resolve(&self, spur: &Spur) -> &str {
+        self.rodeo_resolver.resolve(spur)
+    }
 
     pub fn get_keyword(&self, spur: &Spur) -> Option<TokenKind> {
         self.keywords

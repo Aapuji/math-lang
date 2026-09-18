@@ -1,3 +1,6 @@
+use rug::Integer;
+
+use crate::ast::Prec::Exponentative;
 use crate::source::{SourceMap, Span};
 use crate::token::{Token, TokenKind, LexemeId};
 
@@ -102,7 +105,7 @@ pub enum Expr {
     },
     Latex(Box<Expr>),
     Int {
-        value: rug::Integer,
+        value: AstInt,
         span: Span
     },
     Real {
@@ -432,6 +435,33 @@ impl Expr {
 
 type SymbolId = usize;
 
+#[derive(Debug, Clone, PartialEq, Eq, Ord, Hash)]
+pub enum AstInt {
+    Small(u32),
+    Large(rug::Integer)
+}
+
+impl Into<AstInt> for u32 {
+    fn into(self) -> AstInt {
+        if self > 0x7FFF_FFFF {
+            AstInt::Large(Integer::from(self))
+        } else {
+            AstInt::Small(self)
+        }
+    }
+}
+
+impl PartialOrd for AstInt {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (AstInt::Small(x), AstInt::Small(y)) => x.partial_cmp(y),
+            (AstInt::Small(x), AstInt::Large(y)) => x.partial_cmp(y),
+            (AstInt::Large(x), AstInt::Small(y)) => x.partial_cmp(y),
+            (AstInt::Large(x), AstInt::Large(y)) => x.partial_cmp(y)
+        }
+    }
+}
+
 /// Represents a name. 
 /// The `id` field is first determined from the payload of the identifier token, meaning that it corresponds to the LexemeId.
 /// However, once name resolution occurs, the `id` field is then reused to be the final value of the SymbolId in the symbol table.
@@ -642,7 +672,7 @@ pub enum Type {
     },
     Exponent {
         ty: Box<Type>,
-        exp: Box<Expr>, // must be a Nat
+        exp: Box<Expr>, // must be a Nat; notably must be an AstInt::Small as it is constrained by MAX_ARGS.
         span: Span
     }
     // more
@@ -771,17 +801,54 @@ impl Operation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OpLit {
+    assoc: Assoc,
     name: Var,
-    span: Span
+    prec: Prec,
+    span: Span,
 }
 
 impl OpLit {
-    pub fn new(name: Var, span: Span) -> Self {
-        Self { name, span }
+    pub fn new(assoc: Assoc, name: Var, prec: Prec, span: Span) -> Self {
+        Self { assoc, name, prec, span }
+    }
+
+    pub fn with_assoc(assoc: Assoc, name: Var, span: Span) -> Self {
+        Self {
+            assoc,
+            name,
+            prec: Prec::Call,
+            span
+        }
+    }
+
+    pub fn with_prec(name: Var, prec: Prec, span: Span) -> Self {
+        Self {
+            assoc: Assoc::None,
+            name,
+            prec,
+            span
+        }
+    }
+    
+    pub fn with_name(name: Var, span: Span) -> Self {
+        Self {
+            assoc: Assoc::None,
+            name,
+            prec: Prec::Call,
+            span
+        }
+    }
+
+    pub fn assoc(&self) -> Assoc {
+        self.assoc
     }
 
     pub fn name(&self) -> Var {
         self.name
+    }
+
+    pub fn prec(&self) -> Prec {
+        self.prec
     }
 
     pub fn span(&self) -> Span {
@@ -791,6 +858,36 @@ impl OpLit {
     pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str {
         self.span.get_lexeme(source_map)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Assoc {
+    None,
+    Left,
+    Right
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Prec {
+    Lowest,
+    Lambda,
+    Or,
+    And,
+    Not,
+    Comparison,
+    Range,
+    Additive,
+    Multiplicative,
+    Exponentative,
+    Application,
+    Call,
+    Block,
+    Group
+}
+
+impl Prec {
+    const LOWEST_CUSTOM_PREC: Prec = Prec::Lowest;
+    const HIGHEST_CUSTOM_PREC: Prec = Prec::Application;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
