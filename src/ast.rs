@@ -886,8 +886,32 @@ pub enum Prec {
 }
 
 impl Prec {
-    const LOWEST_CUSTOM_PREC: Prec = Prec::Lowest;
-    const HIGHEST_CUSTOM_PREC: Prec = Prec::Application;
+    pub const MIN_CUSTOM_PREC: Prec = Prec::Lowest;
+    pub const MAX_CUSTOM_PREC: Prec = Prec::Application;
+}
+
+impl TryFrom<u32> for Prec {
+    type Error = ();
+    
+    fn try_from(value: u32) -> Result<Self, Self::Error> {        
+        match value {
+            0 => Ok(Prec::Lowest),
+            1 => Ok(Prec::Lambda),
+            2 => Ok(Prec::Or),
+            3 => Ok(Prec::And),
+            4 => Ok(Prec::Not),
+            5 => Ok(Prec::Comparison),
+            6 => Ok(Prec::Range),
+            7 => Ok(Prec::Additive),
+            8 => Ok(Prec::Multiplicative),
+            9 => Ok(Prec::Exponentative),
+            10 => Ok(Prec::Application),
+            11 => Ok(Prec::Call),
+            12 => Ok(Prec::Block),
+            13 => Ok(Prec::Group),
+            _ => Err(())
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -1,6 +1,7 @@
 use std::iter::Peekable;
 use std::str::CharIndices;
 
+use lasso::Key;
 use unicode_ident::{is_xid_start, is_xid_continue};
 
 use crate::source::{SourceId, SourceMap, Span};
@@ -713,8 +714,7 @@ impl<'t> Lexer<'t> {
                 .get_keyword(&s)
                 .unwrap_or(TokenKind::Ident),
             s
-                .into_inner()
-                .get(),
+                .into_usize() as u32,
             span));
         // TODO: Need to also lex some specially allowed math tokens, like ∈ as identifiers.
     }
@@ -737,7 +737,7 @@ impl<'t> Lexer<'t> {
 
         tokens.push(Token::with_payload(
             TokenKind::Operator,
-            interner.get_or_intern(lexeme).into_inner().get(),
+            interner.get_or_intern(lexeme).into_usize() as u32,
             Span::new(start, end, self.source)));
     }
 

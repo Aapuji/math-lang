@@ -667,14 +667,7 @@ impl Parser {
                 op
             }
 
-            TokenKind::Backtick => {
-                let bt = self.current();
-                self.advance();
-
-                let oplit = self.parse_operator_literal(bt.span().start(), source_map, interner);
-
-                AliasRight::OpLit(oplit)
-            }
+            TokenKind::Backtick => AliasRight::OpLit(self.parse_operator_literal(source_map, interner)),
 
             TokenKind::LParen => {
                 let lp = self.current();
@@ -1713,8 +1706,8 @@ impl Parser {
                         operator: Operation::Ident(operator.try_into().unwrap()),
                         rhs: Box::new(rhs)
                     }
-                } else if let Some(bt) = self.take(TokenKind::Backtick) {
-                    let operator = self.parse_operator_literal(bt.span().start(), source_map, interner);                      
+                } else if let TokenKind::Backtick = self.current_kind() {
+                    let operator = self.parse_operator_literal(source_map, interner);                      
                     let rhs = if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                         unary
                     } else {
@@ -1805,10 +1798,7 @@ impl Parser {
             // operator literal as prefix operation
             TokenKind::Backtick => {
                 let span_start = self.current().span().start();
-                let Some(bt) = self.take(TokenKind::Backtick)
-                else { todo!("expected backtick") };
-
-                let operator = self.parse_operator_literal(bt.span().start(), source_map, interner);
+                let operator = self.parse_operator_literal(source_map, interner);
                 let operand = if let Some(unary) = self.parse_builtin_unary(source_map, interner) {
                     unary
                 } else {
@@ -1836,50 +1826,55 @@ impl Parser {
     }
 
     /// Backtick must have been consumed before calling this function
-    fn parse_operator_literal(&mut self, span_start: usize, source_map: &SourceMap, interner: &ResolvedInterner) -> OpLit {
-        // let assoc = if let Some(minvoke) = self.take(TokenKind::MacroInvoke) {
-        //     match interner.resolve(&Spur::try_from_usize(minvoke.payload() as usize).unwrap()) {
-        //         "lassoc" => Assoc::Left,
-        //         "rassoc" => Assoc::Right,
-        //         _ => todo!("expected only @lassoc or @rassoc in associativity specifier")
-        //     }
-        // } else {
-        //     Assoc::None
-        // };
+    fn parse_operator_literal(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> OpLit {
+        let Some(bt) = self.require(TokenKind::Backtick)
+        else { todo!("expected backtick") };
+        let span_start = bt.span().start();
 
-        // let name = if let Some(name) = self.require(TokenKind::Ident) {
-        //     let name = name.try_into().unwrap();
-        //     let Some(bt) = self.require(TokenKind::Backtick)
-        //     else { todo!("expected backtick") };
+        let assoc = if let Some(minvoke) = self.take(TokenKind::MacroInvoke) {
+            match interner.resolve(&Spur::try_from_usize(minvoke.payload() as usize).unwrap()) {
+                "lassoc" => Assoc::Left,
+                "rassoc" => Assoc::Right,
+                other => todo!("expected only @lassoc or @rassoc in associativity specifier, instead found {other}")
+            }
+        } else {
+            Assoc::None
+        };
 
-        //     name
-        // } else {
-        //     todo!("invalid operator literal; expected identifier")
-        // };
+        let name = if let Some(name) = self.require(TokenKind::Ident) {
+            name.try_into().unwrap()
+        } else {
+            todo!("invalid operator literal; expected identifier")
+        };
 
-        // let prec = if self.accept_op(source_map, ":") {
-        //     let Some(plvl) = self.require(TokenKind::Int)
-        //     else { todo!("expected natural for precedence") };
+        let prec = if self.accept_op(source_map, ":") {
+            let Some(token) = self.require(TokenKind::Int)
+            else { todo!("expected natural for precedence level") };
 
-        //     Prec::try_from(plvl.payload());
-        // };
+            if token.payload() > Prec::MAX_CUSTOM_PREC as u32 {
+                todo!("precedence level must be between 0 and {}", Prec::MAX_CUSTOM_PREC as u32);
+            }
 
-        // let Some(name) = self.require(TokenKind::Ident).map(|t| t.try_into().unwrap())
-        // else { todo!("invalid operator literal; expected identifier") };
+            Some(Prec::try_from(token.payload()).unwrap())
+        } else {
+            None
+        };
 
+        let Some(bt) = self.require(TokenKind::Backtick)
+        else { todo!("expected backtick") };
 
-
-
-        todo!()
-        // if let Some(name) = self.take(TokenKind::Ident) {
-        //     let name = name.try_into().unwrap();
-        //     let Some(bt) = self.require(TokenKind::Backtick)
-        //     else { todo!("expected backtick") };
-
-        //     // OpLit::new(name, Span::new(span_start, bt.span().end(),  bt.span().source_id()))
-        // } else {
-        //     todo!("report error for invalid operator literal")
-        // }
+        if let None = prec {
+            OpLit::with_assoc(
+                assoc,
+                name,
+                Span::new(span_start, bt.span().end(), bt.span().source_id()))
+        } else {
+            OpLit::new(
+                assoc, 
+                name, 
+                prec.unwrap(), 
+                Span::new(span_start, bt.span().end(), bt.span().source_id()))
+        }
     }
 
     /// Attempts to parse a built-in unary expression. If it succeeds, it outputs the expression. If it cannot find a built-in unary operator, it returns None.

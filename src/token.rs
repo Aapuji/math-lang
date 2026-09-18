@@ -267,7 +267,6 @@ impl ActiveInterner {
         rodeo.get_or_intern_static("^");
         rodeo.get_or_intern_static("^=");
         rodeo.get_or_intern_static("|");
-        rodeo.get_or_intern_static("let");
         rodeo.get_or_intern_static("==");
         rodeo.get_or_intern_static("!=");
         rodeo.get_or_intern_static("<");
@@ -302,12 +301,13 @@ impl ActiveInterner {
         rodeo.get_or_intern_static("::");
         rodeo.get_or_intern_static("<::");
         rodeo.get_or_intern_static(":<:");
+        rodeo.get_or_intern_static("@");
         rodeo.get_or_intern_static("->");
         let oend = rodeo.get_or_intern_static("=>");
 
         // these are only used inside an operator literal (@lassoc/@rassoc)
-        rodeo.get_or_intern_static("lassoc");
-        rodeo.get_or_intern_static("rassoc");
+        let lassoc = rodeo.get_or_intern_static("lassoc");
+        let rassoc = rodeo.get_or_intern_static("rassoc");
 
         Self {
             rodeo,
