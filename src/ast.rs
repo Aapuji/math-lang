@@ -1,10 +1,7 @@
 use rug::Integer;
 
-use crate::ast::Prec::Exponentative;
 use crate::source::{SourceMap, Span};
 use crate::token::{Token, TokenKind, LexemeId};
-
-// TODO: store spans
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Stmt {
@@ -58,6 +55,17 @@ pub enum Stmt {
         old: AliasRight,
         span: Span
     },
+    For {
+        binding: Binding,
+        expr: Expr,
+        body: Expr,
+        span: Span
+    },
+    While {
+        cond: Expr,
+        body: Expr,
+        span: Span
+    },
     Expr {
         expr: Expr,
         span: Span
@@ -75,8 +83,10 @@ impl Stmt {
             Self::Enum { span, .. } => *span,
             Self::Struct { span, .. } => *span,
             Self::Type { span, .. } => *span,
-            Self::Expr { span, .. } => *span,
-            Self::Alias { span, .. } => *span
+            Self::Alias { span, .. } => *span,
+            Self::For { span, .. } => *span,
+            Self::While { span, .. } => *span,
+            Self::Expr { span, .. } => *span
         }
     }
 
@@ -91,7 +101,9 @@ impl Stmt {
             Self::Struct { span, .. } => &mut *span,
             Self::Type { span, .. } => &mut *span,
             Self::Alias { span, .. } => &mut *span,
-            Self::Expr { span, .. } => &mut *span,
+            Self::For { span, .. } => &mut *span,
+            Self::While { span, .. } => &mut *span,
+            Self::Expr { span, .. } => &mut *span
         }
     }
 }
@@ -116,6 +128,12 @@ pub enum Expr {
         value: rug::Rational,
         span: Span
     },
+    True(Span),
+    False(Span),
+    Grouping {
+        expr: Box<Expr>,
+        span: Span
+    },
     Array {
         rows: Vec<Vec<Expr>>,
         span: Span
@@ -123,6 +141,13 @@ pub enum Expr {
     Block {
         stmts: Vec<Stmt>,
         tail: Option<Box<Expr>>,
+        span: Span
+    },
+    Operations {    // Thoughts: After name resolution, a pass is done to resolve this node into the concrete operation nodes
+                    // Additionally, it can perform some form of disambiguation, since all operators are built-in at that stage
+                    // So it can take the longest possible valid operator, etc.
+                    // For example, ::- would take :: as it is the longest builtin operator, and then - as the longest one after that.
+        items: Vec<OperationItem>,
         span: Span
     },
     Or {
@@ -214,16 +239,11 @@ pub enum Expr {
         rhs: Box<Expr>,
         span: Span
     },
-    Mod {
+    Mod {   // x % y outputs a mod class type (ie. 5 %2 + 3 == 0). To only get rem, cast back to Int (x % y as Int).
         lhs: Box<Expr>,
         rhs: Box<Expr>,
         span: Span
     },
-    ModClass {
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
-        span: Span
-    }, 
     Exp {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
@@ -292,6 +312,22 @@ pub enum Expr {
         exprs: Vec<Expr>,
         span: Span
     },
+    If {
+        cond: Box<Expr>,
+        if_body: Box<Expr>,
+        else_body: Option<Box<Expr>>,
+        span: Span
+    },
+    Match {
+        value: Box<Expr>,
+        arms: Vec<(Pattern, Option<PatternGuard>, Expr)>,
+        span: Span
+    },
+    // MatchSym {
+    //     value: Box<Expr>,
+    //     arms: Vec<(SymPattern, Option<PatternGuard>, Expr)>,
+    //     span: Span
+    // },
     LetIn {
         def: Box<Let>,
         expr: Box<Expr>,
@@ -340,8 +376,12 @@ impl Expr {
             Self::Int { span, .. } => *span,
             Self::Real { span, .. } => *span,
             Self::Imag { span, .. } => *span,
+            Self::True(span) => *span,
+            Self::False(span) => *span,
+            Self::Grouping { span, .. } => *span,
             Self::Array { span, .. } => *span,
             Self::Block { span, .. } => *span,
+            Self::Operations { span, .. } => *span,
             Self::Or { span, .. } => *span,
             Self::Xor { span, .. } => *span,
             Self::And { span, .. } => *span,
@@ -361,7 +401,6 @@ impl Expr {
             Self::Divide { span, .. } => *span,
             Self::IntDivide { span, .. } => *span,
             Self::Mod { span, .. } => *span,
-            Self::ModClass { span, .. } => *span,
             Self::Exp { span, .. } => *span,
             Self::Range { span, .. } => *span,
             Self::Prefix { span, .. } => *span,
@@ -375,6 +414,9 @@ impl Expr {
             Self::Index { span, .. } => *span,
             Self::Unit { span, .. } => *span,
             Self::Tuple { span, .. } => *span,
+            Self::If { span, .. } => *span,
+            Self::Match { span, .. } => *span,
+            // Self::MatchSym { span, .. } => *span,
             Self::LetIn { span, .. } => *span,
             Self::VarIn { span, .. } => *span,
             Self::ConstIn { span, .. } => *span,
@@ -385,50 +427,56 @@ impl Expr {
         pub fn span_mut(&mut self) -> &mut Span {
         match self {
             Self::Ident(var) => &mut var.span,
-            Self::String { span, .. } => &mut *span,
+            Self::String { span, .. } => span,
             Self::Latex(expr) => expr.span_mut(),
-            Self::Int { span, .. } => &mut *span,
-            Self::Real { span, .. } => &mut *span,
-            Self::Imag { span, .. } => &mut *span,
-            Self::Array { span, .. } => &mut *span,
-            Self::Block { span, .. } => &mut *span,
-            Self::Or { span, .. } => &mut *span,
-            Self::Xor { span, .. } => &mut *span,
-            Self::And { span, .. } => &mut *span,
-            Self::Not { span, .. } => &mut *span,
-            Self::Eq { span, .. } => &mut *span,
-            Self::NotEq { span, .. } => &mut *span,
-            Self::Less { span, .. } => &mut *span,
-            Self::Greater { span, .. } => &mut *span,
-            Self::LessEq { span, .. } => &mut *span,
-            Self::GreaterEq { span, .. } => &mut *span,
-            Self::In { span, .. } => &mut *span,
-            Self::Plus { span, .. } => &mut *span,
-            Self::Minus { span, .. } => &mut *span,
-            Self::PlusMinus { span, .. } => &mut *span,
-            Self::MinusPlus { span, .. } => &mut *span,
-            Self::Times { span, .. } => &mut *span,
-            Self::Divide { span, .. } => &mut *span,
-            Self::IntDivide { span, .. } => &mut *span,
-            Self::Mod { span, .. } => &mut *span,
-            Self::ModClass { span, .. } => &mut *span,
-            Self::Exp { span, .. } => &mut *span,
-            Self::Range { span, .. } => &mut *span,
-            Self::Prefix { span, .. } => &mut *span,
-            Self::Infix { span, .. } => &mut *span,
-            Self::UnaryPlus { span, .. } => &mut *span,
-            Self::Neg { span, .. } => &mut *span,
-            Self::Spread { span, .. } => &mut *span,
-            // Self::Apply { span, .. } => &mut *span,
-            Self::Call { span, .. } => &mut *span,
-            Self::Index { span, .. } => &mut *span,
-            Self::MemberAccess { span, .. } => &mut *span,
-            Self::Unit { span, .. } => &mut *span,
-            Self::Tuple { span, .. } => &mut *span,
-            Self::LetIn { span, .. } => &mut *span,
-            Self::VarIn { span, .. } => &mut *span,
-            Self::ConstIn { span, .. } => &mut *span,
-            Self::FnIn { span, .. } => &mut *span,
+            Self::Int { span, .. } => span,
+            Self::Real { span, .. } => span,
+            Self::Imag { span, .. } => span,
+            Self::True(span) => span,
+            Self::False(span) => span,
+            Self::Grouping { span, .. } => span,
+            Self::Array { span, .. } => span,
+            Self::Block { span, .. } => span,
+            Self::Operations { span, .. } => span,
+            Self::Or { span, .. } => span,
+            Self::Xor { span, .. } => span,
+            Self::And { span, .. } => span,
+            Self::Not { span, .. } => span,
+            Self::Eq { span, .. } => span,
+            Self::NotEq { span, .. } => span,
+            Self::Less { span, .. } => span,
+            Self::Greater { span, .. } => span,
+            Self::LessEq { span, .. } => span,
+            Self::GreaterEq { span, .. } => span,
+            Self::In { span, .. } => span,
+            Self::Plus { span, .. } => span,
+            Self::Minus { span, .. } => span,
+            Self::PlusMinus { span, .. } => span,
+            Self::MinusPlus { span, .. } => span,
+            Self::Times { span, .. } => span,
+            Self::Divide { span, .. } => span,
+            Self::IntDivide { span, .. } => span,
+            Self::Mod { span, .. } => span,
+            Self::Exp { span, .. } => span,
+            Self::Range { span, .. } => span,
+            Self::Prefix { span, .. } => span,
+            Self::Infix { span, .. } => span,
+            Self::UnaryPlus { span, .. } => span,
+            Self::Neg { span, .. } => span,
+            Self::Spread { span, .. } => span,
+            // Self::Apply { span, .. } => span,
+            Self::Call { span, .. } => span,
+            Self::Index { span, .. } => span,
+            Self::MemberAccess { span, .. } => span,
+            Self::Unit { span, .. } => span,
+            Self::Tuple { span, .. } => span,
+            Self::If { span, .. } => span,
+            Self::Match { span, .. } => span,
+            // Self::MatchSym { span, .. } => span,
+            Self::LetIn { span, .. } => span,
+            Self::VarIn { span, .. } => span,
+            Self::ConstIn { span, .. } => span,
+            Self::FnIn { span, .. } => span,
         }
     }
 }
@@ -490,6 +538,11 @@ impl Var {
         }
     }
 
+    /// Creates a fake Token from the Var.
+    pub fn synth_token(&self) -> Token {
+        Token::with_payload(TokenKind::Ident, self.id as u32, self.span)
+    }
+
     pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str {
         self.span.get_lexeme(source_map)
     }
@@ -547,6 +600,11 @@ impl Oper {
         } else {
             Ok(Self::from_token_payload_unchecked(token))
         }
+    }
+
+    /// Creates a fake Token from the Oper.
+    pub fn synth_token(&self) -> Token {
+        Token::with_payload(TokenKind::Operator, self.id, self.span)
     }
 
     pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str {
@@ -660,6 +718,10 @@ pub enum Type {
     Unit {
         span: Span
     },
+    Grouping {
+        ty: Box<Type>,
+        span: Span
+    },
     Named(Var),
     Array {
         shape: Shape,
@@ -682,6 +744,7 @@ impl Type {
     pub fn span(&self) -> Span {
         match self {
             Type::Unit { span } => *span,
+            Type::Grouping { span, .. } => *span,
             Type::Named(var) => var.span,
             Type::Array { span, .. } => *span,
             Type::Tuple { span, .. } => *span,
@@ -692,6 +755,7 @@ impl Type {
     pub fn span_mut(&mut self) -> &mut Span {
         match self {
             Type::Unit { span } => &mut *span,
+            Type::Grouping { span, .. } => &mut *span,
             Type::Named(var) => &mut var.span,
             Type::Array { span, .. } => &mut *span,
             Type::Tuple { span, .. } => &mut *span,
@@ -739,35 +803,6 @@ pub enum AliasRight {
     OpLit(OpLit),
     Expr(Expr)
 }
-
-// impl AliasItem {
-//     pub fn span(&self) -> Span {
-//         match self {
-//             Self::Ident(name) => name.span(),
-//             Self::Operator(op) => op.span()
-//         }
-//     }
-// } 
-
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub enum AliasRight {
-//     Ident(Var),
-//     Operator(Token),
-//     OpLit(OpLit),
-//     Expr(Expr)
-//     // TODO: perhaps also Path?
-// }
-
-// impl AliasTarget {
-//     pub fn span(&self) -> Span {
-//         match self {
-//             Self::Ident(name) => name.span(),
-//             Self::Operator(op) => op.span(),
-//             Self::OpLit(oplit) => oplit.span(), 
-//             Self::Expr(expr) => expr.span()
-//         }
-//     }
-// }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Endpoint {
@@ -847,6 +882,10 @@ impl OpLit {
         self.name
     }
 
+    pub fn name_mut(&mut self) -> &mut Var {
+        &mut self.name
+    }
+
     pub fn prec(&self) -> Prec {
         self.prec
     }
@@ -870,24 +909,34 @@ pub enum Assoc {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Prec {
     Lowest,
+    Assign,
     Lambda,
+    Is,
     Or,
+    Xor,
     And,
-    Not,
     Comparison,
     Range,
     Additive,
     Multiplicative,
     Exponentative,
-    Application,
+    As,
+    Composition,
+    Unary,
     Call,
-    Block,
+    Highest,
+    Access,
     Group
 }
 
 impl Prec {
     pub const MIN_CUSTOM_PREC: Prec = Prec::Lowest;
-    pub const MAX_CUSTOM_PREC: Prec = Prec::Application;
+    pub const MAX_CUSTOM_PREC: Prec = Prec::Highest;
+
+    /// Gives binding power
+    pub fn bp(self) -> u32 {
+        (self as u32 + 1) * 10
+    }
 }
 
 impl TryFrom<u32> for Prec {
@@ -896,19 +945,24 @@ impl TryFrom<u32> for Prec {
     fn try_from(value: u32) -> Result<Self, Self::Error> {        
         match value {
             0 => Ok(Prec::Lowest),
-            1 => Ok(Prec::Lambda),
-            2 => Ok(Prec::Or),
-            3 => Ok(Prec::And),
-            4 => Ok(Prec::Not),
-            5 => Ok(Prec::Comparison),
-            6 => Ok(Prec::Range),
-            7 => Ok(Prec::Additive),
-            8 => Ok(Prec::Multiplicative),
-            9 => Ok(Prec::Exponentative),
-            10 => Ok(Prec::Application),
-            11 => Ok(Prec::Call),
-            12 => Ok(Prec::Block),
-            13 => Ok(Prec::Group),
+            1 => Ok(Prec::Assign),
+            2 => Ok(Prec::Lambda),
+            3 => Ok(Prec::Is),
+            4 => Ok(Prec::Or),
+            5 => Ok(Prec::Xor),
+            6 => Ok(Prec::And),
+            7 => Ok(Prec::Comparison),
+            8 => Ok(Prec::Range),
+            9 => Ok(Prec::Additive),
+            10 => Ok(Prec::Multiplicative),
+            11 => Ok(Prec::Exponentative),
+            12 => Ok(Prec::As),
+            13 => Ok(Prec::Composition),
+            14 => Ok(Prec::Unary),
+            15 => Ok(Prec::Call),
+            16 => Ok(Prec::Highest),
+            17 => Ok(Prec::Access),
+            18 => Ok(Prec::Group),
             _ => Err(())
         }
     }
@@ -920,31 +974,110 @@ pub enum StringPart {
     Expr(Expr)
 }
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub struct Alias {
-//     new: Var,
-//     old: AliasSrc,
-//     kind: AliasKind
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum OperationItem {
+    Expr(Box<Expr>),
+    Ident(Var),
+    Oper(Oper),
+    OpLit(OpLit),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Pattern {
+    Wildcard(Span),
+    Etc(Span),
+    Rest {
+        name: Var,
+        span: Span
+    },
+    Unit(Span),
+    Ident {
+        name: Var,
+        span: Span
+    },
+    Int {
+        value: AstInt,
+        span: Span
+    },
+    Pin {
+        name: Var,
+        span: Span
+    },
+    As {
+        pat: Box<Pattern>,
+        name: Var,
+        span: Span
+    },
+    Type {
+        ty: Type,
+        span: Span
+    },
+    // path
+    Tuple {
+        pats: Vec<Pattern>,
+        span: Span
+    },
+    Array {
+        pats: Vec<Pattern>,
+        span: Span
+    },
+    // more
+    Or {
+        lhs: Box<Pattern>,
+        rhs: Box<Pattern>,
+        span: Span
+    },
+    And {
+        lhs: Box<Pattern>,
+        rhs: Box<Pattern>,
+        span: Span
+    },
+    Not {
+        pat: Box<Pattern>,
+        span: Span
+    },
+    Group {
+        pat: Box<Pattern>,
+        span: Span
+    },
+    // Sym(SymPattern)
+}
+
+// #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+// pub enum SymPattern {
+//     // <expr>
+//     /* ?[x]a
+//         binding         = '?' var_bindings? IDENT type_annot? ;
+//         var_bindings    = '[' ( '$' IDENT )+ ']' ;
+//         type_annot      = ':' type ;
+//     */
+//     // $x (with optional type annotation)
+//     // ... <pat> 
+//     // if
+//     // when
+//     ExprBind {   // ?[... $vars]
+//         var_bindings: Vec<SymVar>,
+//         name: Var,
+//         ty: Option<Type>,
+//         span: Span
+//     },
+//     VarBind(SymVar),
+//     Rest {
+//         pat: Box<SymPattern>,
+//         span: Span
+//     },
+//     Guard {
+//         cond: Box<Expr>,
+//         span: Span
+//     }
 // }
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub enum AliasSrc {
-//     Ident(Var),
-//     Operator(Operation),
-//     Expr(Expr)
+// struct SymVar {
+    
 // }
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub enum AliasKind {
-//     Ident,
-//     Operator
-// }
-
-// // TODO: this
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub struct Macro {
-//     name: Var,
-//     arity: u8,
-
-//     // block: Expr
-// }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PatternGuard {
+    guard: Expr,
+    span: Span
+}
