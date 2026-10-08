@@ -1,2 +1,8 @@
-alias x for (1);
-y;
+alias x for y;
+alias z for y;
+alias y for z;
+if x {
+    y
+} else if x {
+    z
+};

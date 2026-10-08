@@ -231,7 +231,7 @@ impl ActiveInterner {
         keywords.insert(rodeo.get_or_intern_static("using"), TokenKind::Using);
 
         // both keywords and builtin operators
-        let ostart = rodeo.get_or_intern_static("in");
+        let ostart: Spur = rodeo.get_or_intern_static("in");
         keywords.insert(ostart, TokenKind::In);
         keywords.insert(rodeo.get_or_intern_static("and"), TokenKind::And);
         keywords.insert(rodeo.get_or_intern_static("or"), TokenKind::Or);
@@ -305,7 +305,9 @@ impl ActiveInterner {
 
         // these are only used inside an operator literal (@lassoc/@rassoc)
         rodeo.get_or_intern_static("lassoc");
-        rodeo.get_or_intern_static("rassoc");
+        let last_builtin_lexeme_id = rodeo.get_or_intern_static("rassoc");
+
+        dbg!(last_builtin_lexeme_id.into_usize());
 
         Self {
             rodeo,

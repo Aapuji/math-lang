@@ -19,7 +19,6 @@ pub struct Parser<'r> {
     alias_resolver: &'r mut AliasResolver
 }
 
-
 impl<'r> Parser<'r> {
     pub const MAX_ARGS: usize = 255;
 
@@ -652,7 +651,11 @@ impl<'r> Parser<'r> {
         else { todo!("expected ';'") };
 
         let new_item = AliasItem::from(&new);
-        let old_item = AliasItem::from(&old);
+        let old_item = match old {
+            AliasRight::Expr(_) => AliasItem::from(&old),
+
+            _ => self.alias_resolver.get_alias_from_right_and_record(&old)
+        };
         self.alias_resolver.register_alias(new_item, old_item);
 
         Stmt::Alias {
@@ -937,15 +940,14 @@ impl<'r> Parser<'r> {
             binding_power < match self.get_resolved_token_entry(token, source_map, interner) {
                 (tok, EntryOrExpr::Entry(entry)) => {
                     token = tok;
-                    
-                    self.advance();
-
-                    if entry.led.is_none() {
-                        todo!("Expected binary operator, found {:?}", self.current())
-                    }
-
                     led = entry.led;
-                    entry.led_prec
+
+                    if led.is_none() {
+                        0 // break
+                    } else {
+                        self.advance();
+                        entry.led_prec
+                    }
                 }
 
                 (tok, EntryOrExpr::Expr(_)) => {
@@ -955,6 +957,10 @@ impl<'r> Parser<'r> {
                 }
             }
         } {
+            if led.is_none() {
+                todo!("Expected binary operator, found {:?}", self.current())
+            }
+
             lhs = led.unwrap()(self, token, lhs, source_map, interner);
         }
 
@@ -1009,7 +1015,7 @@ impl<'r> Parser<'r> {
                 let oper: Oper = token.try_into().unwrap();
                 Self::get_operator_entry_inner(OperatorKey::Oper(oper.get_lexeme(source_map)))
             }
-            _ => todo!()
+            _ => Self::get_operator_entry_inner(key)
         }
     }
 
@@ -1018,87 +1024,107 @@ impl<'r> Parser<'r> {
         use TokenKind::*;
 
         match key {
-            Kind(LParen) => OperatorEntry      { nud: Some(Self::parse_grouping),  nud_prec: Prec::Group.bp(), led: Some(Self::parse_call),    led_prec: Prec::Call.bp() },
-            Kind(RParen) => OperatorEntry      { nud: None,                        nud_prec: 0,                led: None,                      led_prec: 0 },
-            Kind(LBracket) => OperatorEntry    { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                      led_prec: 0 },
-            Kind(RBracket) => OperatorEntry    { nud: None,                        nud_prec: 0,                led: None,                      led_prec: 0 },
-            Kind(LBrace) => OperatorEntry      { nud: Some(Self::parse_block),     nud_prec: Prec::Group.bp(), led: None,  /* record lit? */   led_prec: 0 },
-            Kind(RBrace) => OperatorEntry      { nud: None,                        nud_prec: 0,                led: None,                      led_prec: 0 },
-            Kind(Semicolon) => OperatorEntry   { nud: None,                        nud_prec: 0,                led: None,                      led_prec: 0 },
-            Kind(Comma) => OperatorEntry       { nud: None,                        nud_prec: 0,                led: None,                      led_prec: 0 },
-            Kind(Dot) => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_accessor), led_prec: Prec::Access.bp() },
-            Kind(Ident) => OperatorEntry { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                      led_prec: 0 },
-            Kind(Int) => OperatorEntry         { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                      led_prec: 0 },
-            Kind(Real) => OperatorEntry        { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                      led_prec: 0 },
-            Kind(Imag) => OperatorEntry        { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                      led_prec: 0 },
-            Kind(StringStart) => OperatorEntry { nud: Some(Self::parse_lit), nud_prec: 0, led: None, led_prec: 0 },
-            Kind(Let) => OperatorEntry { nud: Some(Self::parse_def_in), nud_prec: 0, led: None, led_prec: 0 },
-            Kind(Var) => OperatorEntry { nud: Some(Self::parse_def_in), nud_prec: 0, led: None, led_prec: 0 },
-            Kind(Const) => OperatorEntry { nud: Some(Self::parse_def_in), nud_prec: 0, led: None, led_prec: 0 },
-            Kind(Fn) => OperatorEntry { nud: Some(Self::parse_def_in), nud_prec: 0, led: None, led_prec: 0 },
-            Kind(For) => OperatorEntry { nud: None, nud_prec: 0, led: None, led_prec: 0 },
-            Kind(While) => OperatorEntry { nud: None, nud_prec: 0, led: None, led_prec: 0 },
-            Kind(If) => OperatorEntry { nud: Some(Self::parse_if), nud_prec: 0, led: None, led_prec: 0 },
-            Kind(Else) => OperatorEntry { nud: None, nud_prec: 0, led: None, led_prec: 0 },
-            Kind(Match) => OperatorEntry { nud: Some(Self::parse_match), nud_prec: 0, led: None, led_prec: 0 },
-            Kind(And) => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_and), led_prec: Prec::And.bp() },
-            Kind(Or) => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_or), led_prec: Prec::Or.bp() },
-            Kind(Xor) => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_xor), led_prec: Prec::Xor.bp() },
-            Kind(Not) => OperatorEntry { nud: Some(Self::parse_not), nud_prec: Prec::Unary.bp(), led: None, led_prec: 0 },
-            Kind(Is) => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_is), led_prec: Prec::Is.bp() },
-            Kind(As) => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_as), led_prec: Prec::As.bp() },
-            Kind(SlashIn) => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_membership), led_prec: Prec::Comparison.bp() },
-            Kind(SlashNotIn) => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_membership), led_prec: Prec::Comparison.bp() },
-            Kind(Eq) => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_assign), led_prec: Prec::Assign.bp() },
-            Oper("∈") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_membership), led_prec: Prec::Comparison.bp() },
-            Oper("∉") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_membership), led_prec: Prec::Comparison.bp() },
-            Oper("+") => OperatorEntry { nud: Some(Self::parse_builtin_unary), nud_prec: Prec::Unary.bp(), led: Some(Self::parse_additive), led_prec: Prec::Additive.bp() },
-            Oper("+=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_assign), led_prec: Prec::Assign.bp() },
-            Oper("-") => OperatorEntry { nud: Some(Self::parse_builitin_unary), nud_prec: Prec::Unary.bp(), led: Some(Self::parse_additive), led_prec: Prec::Additive.bp() },
-            Oper("-=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_assign), led_prec: Prec::Assign.bp() },
-            Oper("+-") => OperatorEntry { nud: Some(Self::parse_builtin_unary), nud_prec: Prec::Unary.bp(), led: Some(Self::parse_additive), led_prec: Prec::Additive.bp() },
-            Oper("+-=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(parse_assign), led_prec: Prec::Assign.bp() },
-            Oper("-+") => OperatorEntry { nud: Some(Self::parse_builtin_unary), nud_prec: Prec::Unary.bp(), led: Some(Self::parse_additive), led_prec: Prec::Additive.bp() },
-            Oper("-+=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_assign), led_prec: Prec::Assign.bp() },
-            Oper("*") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_multiplicative), led_prec: Prec::Multiplicative.bp() },
-            Oper("*=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_assign), led_prec: Prec::Assign.bp() },
-            Oper("/") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_multiplicative), led_prec: Prec::Multiplicative.bp() },
-            Oper("/=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_assign), led_prec: Prec::Assign.bp() },
-            Oper("//") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_multiplicative), led_prec: Prec::Multiplicative.bp() },
-            Oper("//=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_assign), led_prec: Prec::Assign.bp() },
-            Oper("%") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_multiplicative), led_prec: Prec::Multiplicative.bp() },
-            Oper("%=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_assign), led_prec: Prec::Assign.bp() },
-            Oper("^") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_exponentative), led_prec: Prec::Exponentative.bp() },
-            Oper("^=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_assign), led_prec: Prec::Assign.bp() },
-            Oper("|") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_pipe), led_prec: Prec::Lowest.bp() },
-            Oper("==") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_comparison), led_prec: Prec::Comparison.bp() },
-            Oper("!=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_comparison), led_prec: Prec::Comparison.bp() },
-            Oper("<") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_comparison), led_prec: Prec::Comparison.bp() },
-            Oper("<=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_comparison), led_prec: Prec::Comparison.bp() },
-            Oper(">") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_comparison), led_prec: Prec::Comparison.bp() },
-            Oper(">=") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_comparison), led_prec: Prec::Comparison.bp() },
-            Oper("...") => OperatorEntry { nud: Some(Self::parse_spread), nud_prec: Prec::Lowest.bp(), led: None, led_prec: 0 },
-            // TODO: ranges
-            Oper("@") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_composition), led_prec: Prec::Composition.bp() },
-            Oper("->") => OperatorEntry { nud: None, nud_prec: 0, led: Some(Self::parse_lambda), led_prec: Prec::Lambda.bp() },
+            Kind(LParen) => OperatorEntry       { nud: Some(Self::parse_grouping),  nud_prec: Prec::Group.bp(), led: Some(Self::parse_call),            led_prec: Prec::Call.bp() },
+            Kind(RParen) => OperatorEntry       { nud: None,                        nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(LBracket) => OperatorEntry     { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(RBracket) => OperatorEntry     { nud: None,                        nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(LBrace) => OperatorEntry       { nud: Some(Self::parse_block),     nud_prec: Prec::Group.bp(), led: None,  /* record lit? */           led_prec: 0 },
+            Kind(RBrace) => OperatorEntry       { nud: None,                        nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Semicolon) => OperatorEntry    { nud: None,                        nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Comma) => OperatorEntry        { nud: None,                        nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Dot) => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_accessor),        led_prec: Prec::Access.bp() },
+            Kind(Ident) => OperatorEntry        { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Int) => OperatorEntry          { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Real) => OperatorEntry         { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Imag) => OperatorEntry         { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(StringStart) => OperatorEntry  { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Let) => OperatorEntry          { nud: Some(Self::parse_def_in),    nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Var) => OperatorEntry          { nud: Some(Self::parse_def_in),    nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Const) => OperatorEntry        { nud: Some(Self::parse_def_in),    nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Fn) => OperatorEntry           { nud: Some(Self::parse_def_in),    nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(For) => OperatorEntry          { nud: None,                        nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(While) => OperatorEntry        { nud: None,                        nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(If) => OperatorEntry           { nud: Some(Self::parse_if),        nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Else) => OperatorEntry         { nud: None,                        nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Match) => OperatorEntry        { nud: Some(Self::parse_match),     nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(And) => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_and),             led_prec: Prec::And.bp() },
+            Kind(Or) => OperatorEntry           { nud: None,                        nud_prec: 0,                led: Some(Self::parse_or),              led_prec: Prec::Or.bp() },
+            Kind(Xor) => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_xor),             led_prec: Prec::Xor.bp() },
+            Kind(Not) => OperatorEntry          { nud: Some(Self::parse_unary),     nud_prec: Prec::Unary.bp(), led: None,                              led_prec: 0 },
+            Kind(Is) => OperatorEntry           { nud: None,                        nud_prec: 0,                led: Some(Self::parse_is),              led_prec: Prec::Is.bp() },
+            Kind(As) => OperatorEntry           { nud: None,                        nud_prec: 0,                led: Some(Self::parse_as),              led_prec: Prec::As.bp() },
+            Kind(SlashIn) => OperatorEntry      { nud: None,                        nud_prec: 0,                led: Some(Self::parse_membership),      led_prec: Prec::Comparison.bp() },
+            Kind(SlashNotIn) => OperatorEntry   { nud: None,                        nud_prec: 0,                led: Some(Self::parse_membership),      led_prec: Prec::Comparison.bp() },
+            Kind(Eq) => OperatorEntry           { nud: None,                        nud_prec: 0,                led: Some(Self::parse_assign),          led_prec: Prec::Assign.bp() },
+            Oper("∈") => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_membership),      led_prec: Prec::Comparison.bp() },
+            Oper("∉") => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_membership),      led_prec: Prec::Comparison.bp() },
+            Oper("+") => OperatorEntry          { nud: Some(Self::parse_unary),     nud_prec: Prec::Unary.bp(), led: Some(Self::parse_additive),        led_prec: Prec::Additive.bp() },
+            Oper("+=") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_assign),          led_prec: Prec::Assign.bp() },
+            Oper("-") => OperatorEntry          { nud: Some(Self::parse_unary),     nud_prec: Prec::Unary.bp(), led: Some(Self::parse_additive),        led_prec: Prec::Additive.bp() },
+            Oper("-=") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_assign),          led_prec: Prec::Assign.bp() },
+            Oper("+-") => OperatorEntry         { nud: Some(Self::parse_unary),     nud_prec: Prec::Unary.bp(), led: Some(Self::parse_additive),        led_prec: Prec::Additive.bp() },
+            Oper("+-=") => OperatorEntry        { nud: None,                        nud_prec: 0,                led: Some(Self::parse_assign),          led_prec: Prec::Assign.bp() },
+            Oper("-+") => OperatorEntry         { nud: Some(Self::parse_unary),     nud_prec: Prec::Unary.bp(), led: Some(Self::parse_additive),        led_prec: Prec::Additive.bp() },
+            Oper("-+=") => OperatorEntry        { nud: None,                        nud_prec: 0,                led: Some(Self::parse_assign),          led_prec: Prec::Assign.bp() },
+            Oper("*") => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_multiplicative),  led_prec: Prec::Multiplicative.bp() },
+            Oper("*=") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_assign),          led_prec: Prec::Assign.bp() },
+            Oper("/") => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_multiplicative),  led_prec: Prec::Multiplicative.bp() },
+            Oper("/=") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_assign),          led_prec: Prec::Assign.bp() },
+            Oper("//") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_multiplicative),  led_prec: Prec::Multiplicative.bp() },
+            Oper("//=") => OperatorEntry        { nud: None,                        nud_prec: 0,                led: Some(Self::parse_assign),          led_prec: Prec::Assign.bp() },
+            Oper("%") => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_multiplicative),  led_prec: Prec::Multiplicative.bp() },
+            Oper("%=") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_assign),          led_prec: Prec::Assign.bp() },
+            Oper("^") => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_exponentative),   led_prec: Prec::Exponentative.bp() },
+            Oper("^=") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_assign),          led_prec: Prec::Assign.bp() },
+            Oper("|") => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_pipe),            led_prec: Prec::Lowest.bp() },
+            Oper("==") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_comparison),      led_prec: Prec::Comparison.bp() },
+            Oper("!=") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_comparison),      led_prec: Prec::Comparison.bp() },
+            Oper("<") => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_comparison),      led_prec: Prec::Comparison.bp() },
+            Oper("<=") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_comparison),      led_prec: Prec::Comparison.bp() },
+            Oper(">") => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_comparison),      led_prec: Prec::Comparison.bp() },
+            Oper(">=") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_comparison),      led_prec: Prec::Comparison.bp() },
+            Oper("...") => OperatorEntry        { nud: Some(Self::parse_spread),    nud_prec: Prec::Lowest.bp(),led: None,                              led_prec: 0 },
+            Oper("..") => todo!(),
+            Oper("<..") => todo!(),
+            Oper("..<") => todo!(),
+            Oper("<..<") => todo!(),
+            Oper(":") => todo!(),
+            Oper("<:") => todo!(),
+            Oper(":<") => todo!(),
+            Oper("<:<") => todo!(),
+            Oper("::") => todo!(),
+            Oper("<::") => todo!(),
+            Oper("@") => OperatorEntry          { nud: None,                        nud_prec: 0,                led: Some(Self::parse_composition),     led_prec: Prec::Composition.bp() },
+            Oper("->") => OperatorEntry         { nud: None,                        nud_prec: 0,                led: Some(Self::parse_lambda),          led_prec: Prec::Lambda.bp() },
             Kind(Operator) => unreachable!(),
             _ => todo!()
         }
     }
 
-    fn parse_grouping(&mut self, token: Token, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+    fn parse_spread(&mut self, token: Token, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        todo!()
+    }
+
+    fn parse_pipe(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        todo!()
+    }
+
+    fn parse_lambda(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        todo!()
+    }
+
+    fn parse_assign(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
         todo!()
     }
 
     fn parse_if(&mut self, token: Token, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        println!("HERE: {:?}", self.current());
         let cond = Box::new(self.parse_expr(source_map, interner, 0));
 
+        println!("NOW HERE; {:?}", self.current());
         let Some(lb) = self.take(TokenKind::LBrace)
-        else { todo!("expected '{{'") };
-        let if_body = Box::new(self.parse_block(token, source_map, interner));
-
-        let Some(rb) = self.take(TokenKind::RBrace)
-        else { todo!("expected '{{'") };
+        else { todo!("Expected '{{'") };
+        let if_body = Box::new(self.parse_block(lb, source_map, interner));
 
         if let TokenKind::Else = self.current_kind() {
             self.advance();
@@ -1112,10 +1138,10 @@ impl<'r> Parser<'r> {
             }
         } else {
             Expr::If {
+                span: Span::new(token.span().start(), if_body.span().end(), if_body.span().source_id()),
                 cond,
                 if_body,
                 else_body: None,
-                span: Span::new(token.span().start(), rb.span().end(), rb.span().source_id())
             }
         }
     }
@@ -1136,10 +1162,6 @@ impl<'r> Parser<'r> {
         todo!()
     }
 
-    fn parse_not(&mut self, token: Token, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
-        todo!()
-    }
-
     fn parse_is(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
         todo!()
     }
@@ -1152,12 +1174,42 @@ impl<'r> Parser<'r> {
         todo!()
     }
 
+    fn parse_comparison(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        todo!()
+    }
+
+    fn parse_additive(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        todo!()
+    }
+
+    fn parse_multiplicative(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        todo!()
+    }
+
+    fn parse_exponentative(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        todo!()
+    }
+
+    // TODO Ranges
+
+    fn parse_composition(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        todo!()
+    }
+
     fn parse_call(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
         todo!()
     }
 
     fn parse_accessor(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        todo!()
+    }
 
+    fn parse_unary(&mut self, token: Token, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        todo!()
+    }
+
+    fn parse_grouping(&mut self, token: Token, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
+        todo!()
     }
 
     fn parse_def_in(&mut self, token: Token, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
