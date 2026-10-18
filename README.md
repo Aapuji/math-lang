@@ -25,7 +25,7 @@ sym Linear(x, m, b);
 
 rewrite rule
    ?m * $x + ?b
-when free([m, b], x)    # When all values of a logical array (ie. []Bool) are true, the array is truthy
+when free({m, b}, x)   # Unordered unions reduce automatically ({true, true} is reduced to {true})
 => Linear(x, m, b);
 
 # Constraints
