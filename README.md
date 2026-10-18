@@ -17,13 +17,6 @@ let W(z: Complex) = LambertW(z);
 rewrite rule W($x) + W($y) =>
   W(x * y * (1/W(x) + 1/W(y)));
 
-# Or should it be?
-rewrite sym W($x) + W($y) => ... ;
-
-#= The thought is that 'rule' or 'sym' would only be necessary if I should allow first-class rules
-Because then I could do something like 'rewrite R ...', so it would be necessary to distinguish between
-that and something like 'rewrite rule R ...'
-
 # Some more thoughts...
 # Constraints
 rewrite rule
