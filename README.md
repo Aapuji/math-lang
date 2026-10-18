@@ -23,8 +23,10 @@ rewrite rule diff(?f(?[$x]g), $x) => diff(f(x), g(x)) * diff(g(x), x);
 # And constraint on independency
 sym Linear(x, m, b);
 
-rewrite rule ?m * $x + ?b => Linear(x, m, b)
-   when free([m, b], x);   # When all values of a logical array (ie. []Bool) are true, the array is truthy
+rewrite rule
+   ?m * $x + ?b
+when free([m, b], x)    # When all values of a logical array (ie. []Bool) are true, the array is truthy
+=> Linear(x, m, b);
 
 # Constraints
 rewrite rule
