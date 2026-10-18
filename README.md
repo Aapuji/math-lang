@@ -25,7 +25,7 @@ sym Linear(x, m, b);
 
 rewrite rule
    ?m * $x + ?b
-when free({m, b}, x)   # Unordered unions reduce automatically ({true, true} is reduced to {true})
+when free({m, b}, x)   # Unordered unions reduce automatically ({true, true} is reduced to {true} ~ true)
 => Linear(x, m, b);
 
 # Constraints
