@@ -24,7 +24,7 @@ rewrite rule diff(?f(?[$x]g), $x) => diff(f(x), g(x)) * diff(g(x), x);
 sym Linear(x, m, b);
 
 rewrite rule ?m * $x + ?b => Linear(x, m, b)
-   when free([m, b], x);   # When all values of a logical array (ie. []Bool) are the same, the array is truthy/falsy accordingly
+   when free([m, b], x);   # When all values of a logical array (ie. []Bool) are true, the array is truthy
 
 # Constraints
 rewrite rule
