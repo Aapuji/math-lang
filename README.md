@@ -40,7 +40,7 @@ rewrite rule abs(?x^2) =>
    else -x;
 
 # restricted rewriting
-let f(y) = rewrite ?x + ?x => 2*x in y^4 + y^4;
+let f(y) = rewrite rule ?x + ?x => 2*x in y^4 + y^4;
 ```
 ## Doing Probability
 ```
