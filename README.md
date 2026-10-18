@@ -14,24 +14,31 @@ sym LambertW(z: Complex) := let w = LambertW(z) in
 let W(z: Complex) = LambertW(z);
 
 # We can add a rewrite rule
-rewrite rule W($x) + W($y) =>
+rewrite rule W(?x) + W(?y) =>
   W(x * y * (1/W(x) + 1/W(y)));
 
-# Some more thoughts...
+# We can bind variables in arbitrary expressions
+rewrite rule diff(?f(?[$x]g), $x) => diff(f(x), g(x)) * diff(g(x), x);
+
+# And constraint on independency
+sym Linear(m, b);
+
+rewrite rule ?m * $x + ?b => Linear(m, b)(x)
+   when free([m, b], x).all();
+
 # Constraints
 rewrite rule
-   abs($x: Real)
+   abs(?x: Real)
 when x >= 0
 =>
    x;
 # versus piecewise
-rewrite rule abs($x^2) =>
+rewrite rule abs(?x^2) =>
    if x >= 0 then x
    else -x;
 
 # restricted rewriting
-let f(y) = rewrite $x + $x => 2*x in y^4 + y^4;
-let f(y) = y^4 + y^4 /. $x + $x => 2*x # ?
+let f(y) = rewrite ?x + ?x => 2*x in y^4 + y^4;
 ```
 ## Doing Probability
 ```
