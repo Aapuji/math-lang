@@ -6,8 +6,9 @@ use rug::{Integer, Rational};
 
 use crate::alias_resolution::{AliasFragment, AliasItem, AliasResolver};
 use crate::ast::*;
-use crate::lexer::StringPrefix;
+use crate::lexer::{EscSeq, StringPrefix};
 use crate::source::{SourceMap, Span};
+use crate::token::TokenKind::EscapeSeq;
 use crate::token::{ResolvedInterner, Token, TokenKind};
 
 type TokenStream = Peekable<Chain<IntoIter<Token>, Repeat<Token>>>;
@@ -902,6 +903,8 @@ impl<'r> Parser<'r> {
     fn parse_expr_stmt(&mut self, source_map: &SourceMap, interner: &ResolvedInterner) -> Stmt {
         let expr = self.parse_expr(source_map, interner, 0);
 
+        println!("EXPR THEn: {:?}", self.current());
+
         if let Some(semi) = self.take(TokenKind::Semicolon) {
             Stmt::Expr {
                 span: Span::new(expr.span().start(), semi.span().end(), semi.span().source_id()),
@@ -915,6 +918,7 @@ impl<'r> Parser<'r> {
     /// A Pratt Parser for expressions
     fn parse_expr(&mut self, source_map: &SourceMap, interner: &ResolvedInterner, binding_power: u32) -> Expr {
         let mut token = self.advance();
+        println!("Token: {:?} lexeme: {:?},\n\tHERE: {:?} lexeme: {:?}\n\tBP:{}", token, token.get_lexeme(source_map), self.current(), self.current().get_lexeme(source_map), binding_power);
 
         let mut lhs = match self.get_resolved_token_entry(token, source_map, interner) {
             (tok, EntryOrExpr::Entry(entry)) => {
@@ -933,35 +937,16 @@ impl<'r> Parser<'r> {
                 expr
             }
         };
-        
-        let mut led = None; // will be replaced or unused
-        while {
-            token = self.current();
-            binding_power < match self.get_resolved_token_entry(token, source_map, interner) {
-                (tok, EntryOrExpr::Entry(entry)) => {
-                    token = tok;
-                    led = entry.led;
 
-                    if led.is_none() {
-                        0 // break
-                    } else {
-                        self.advance();
-                        entry.led_prec
-                    }
-                }
 
-                (tok, EntryOrExpr::Expr(_)) => {
-                    token = tok;
+        while let (tok, EntryOrExpr::Entry(entry)) = self.get_resolved_token_entry(self.current(), source_map, interner) {
+            token = tok;
+            
+            let Some(led) = entry.led else { break };
+            if entry.led_prec <= binding_power { break }
 
-                    0 // essentially break
-                }
-            }
-        } {
-            if led.is_none() {
-                todo!("Expected binary operator, found {:?}", self.current())
-            }
-
-            lhs = led.unwrap()(self, token, lhs, source_map, interner);
+            self.advance();
+            lhs = led(self, token, lhs, source_map, interner);
         }
 
         lhs
@@ -970,31 +955,34 @@ impl<'r> Parser<'r> {
     fn get_resolved_token_entry(&mut self, token: Token, source_map: &SourceMap, interner: &ResolvedInterner) -> (Token, EntryOrExpr<'r>) {
         match token.kind() {
             TokenKind::Ident => {
-                let frag = self.alias_resolver.resolve_var(&mut token.try_into().unwrap());
+                let (frag, record) = self.alias_resolver.resolve_var(&mut token.try_into().unwrap());
 
                 match frag {
-                    AliasFragment::Ident(name) => (
-                        name.synth_token(), 
-                        EntryOrExpr::Entry(Self::get_operator_entry(token, OperatorKey::Kind(TokenKind::Ident), source_map))
-                    ),
-                    AliasFragment::Oper(oper) => (
-                        token, 
-                        EntryOrExpr::Entry(Self::get_operator_entry_inner(OperatorKey::Oper(oper.get_lexeme(source_map))))
-                    ),
+                    AliasFragment::Ident(name) => {
+                        let token = name.synth_token(record.map(|r| r.def_span()));
+                        
+                        (token, EntryOrExpr::Entry(Self::get_operator_entry_inner(OperatorKey::Kind(TokenKind::Ident))))
+                    }
+                    AliasFragment::Oper(oper) => {
+                        let token = oper.synth_token(record.map(|r| r.def_span()));
+
+                        (token, EntryOrExpr::Entry(Self::get_operator_entry_inner(OperatorKey::Oper(token.get_lexeme(source_map)))))
+                    }
                     AliasFragment::OpLit(oplit) => todo!(),
                     AliasFragment::Expr(expr) => (token, EntryOrExpr::Expr(expr))
                 }
             }  
 
             TokenKind::Operator => {
-                let frag = self.alias_resolver.resolve_oper(&mut token.try_into().unwrap());
+                let (frag, record) = self.alias_resolver.resolve_oper(&mut token.try_into().unwrap());
 
                 match frag {
                     AliasFragment::Ident(_) => unreachable!(),
-                    AliasFragment::Oper(_) => (
-                        token, 
-                        EntryOrExpr::Entry(Self::get_operator_entry(token, OperatorKey::Kind(TokenKind::Operator), source_map))
-                    ),
+                    AliasFragment::Oper(oper) => {
+                        let token = oper.synth_token(record.map(|r| r.def_span()));
+                        
+                        (token, EntryOrExpr::Entry(Self::get_operator_entry_inner(OperatorKey::Oper(token.get_lexeme(source_map)))))
+                    },
                     AliasFragment::OpLit(oplit) => todo!(),
                     AliasFragment::Expr(_) => unreachable!()
                 }
@@ -1038,6 +1026,9 @@ impl<'r> Parser<'r> {
             Kind(Real) => OperatorEntry         { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
             Kind(Imag) => OperatorEntry         { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
             Kind(StringStart) => OperatorEntry  { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(True) => OperatorEntry         { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(False) => OperatorEntry        { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
+            Kind(Underscore) => OperatorEntry   { nud: Some(Self::parse_lit),       nud_prec: 0,                led: None,                              led_prec: 0 },
             Kind(Let) => OperatorEntry          { nud: Some(Self::parse_def_in),    nud_prec: 0,                led: None,                              led_prec: 0 },
             Kind(Var) => OperatorEntry          { nud: Some(Self::parse_def_in),    nud_prec: 0,                led: None,                              led_prec: 0 },
             Kind(Const) => OperatorEntry        { nud: Some(Self::parse_def_in),    nud_prec: 0,                led: None,                              led_prec: 0 },
@@ -1118,10 +1109,8 @@ impl<'r> Parser<'r> {
     }
 
     fn parse_if(&mut self, token: Token, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
-        println!("HERE: {:?}", self.current());
         let cond = Box::new(self.parse_expr(source_map, interner, 0));
 
-        println!("NOW HERE; {:?}", self.current());
         let Some(lb) = self.take(TokenKind::LBrace)
         else { todo!("Expected '{{'") };
         let if_body = Box::new(self.parse_block(lb, source_map, interner));
@@ -1179,15 +1168,97 @@ impl<'r> Parser<'r> {
     }
 
     fn parse_additive(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
-        todo!()
+        let spur = Spur::try_from_usize(token.payload() as usize);
+        let spur = spur.as_ref();
+        let operators = interner.operators();
+
+        if operators.get("+") == spur {
+            let rhs = self.parse_expr(source_map, interner, Prec::Additive.bp());
+            Expr::Plus {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        } else if operators.get("-") == spur {
+            let rhs = self.parse_expr(source_map, interner, Prec::Additive.bp());
+            Expr::Minus {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        } else if operators.get("+-") == spur {
+            let rhs = self.parse_expr(source_map, interner, Prec::Additive.bp());
+            Expr::PlusMinus {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        } else if operators.get("-+") == spur {
+            let rhs = self.parse_expr(source_map, interner, Prec::Additive.bp());
+            Expr::MinusPlus {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        } else {
+            unreachable!()
+        }
     }
 
     fn parse_multiplicative(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
-        todo!()
+        let spur = Spur::try_from_usize(token.payload() as usize);
+        let spur = spur.as_ref();
+        let operators = interner.operators();
+
+        if operators.get("*") == spur {
+            let rhs = self.parse_expr(source_map, interner, Prec::Multiplicative.bp());
+            Expr::Times {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        } else if operators.get("/") == spur {
+            let rhs = self.parse_expr(source_map, interner, Prec::Multiplicative.bp());
+            Expr::Divide {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        } else if operators.get("//") == spur {
+            let rhs = self.parse_expr(source_map, interner, Prec::Multiplicative.bp());
+            Expr::IntDivide {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        } else if operators.get("%") == spur {
+            let rhs = self.parse_expr(source_map, interner, Prec::Multiplicative.bp());
+            Expr::Mod {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        } else {
+            unreachable!()
+        }
+
     }
 
     fn parse_exponentative(&mut self, token: Token, lhs: Expr, source_map: &SourceMap, interner: &ResolvedInterner) -> Expr {
-        todo!()
+        let spur = Spur::try_from_usize(Oper::from_token_payload_unchecked(token).id() as usize);
+        let spur = spur.as_ref();
+        let operators = interner.operators();
+
+        if operators.get("^") == spur {
+            let rhs = self.parse_expr(source_map, interner, Prec::Exponentative.bp() - 1);
+            Expr::Exp {
+                span: Span::new(lhs.span().start(), rhs.span().end(), rhs.span().source_id()),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        } else {
+            unreachable!()
+        }
     }
 
     // TODO Ranges
@@ -1431,19 +1502,27 @@ impl<'r> Parser<'r> {
                         }
 
                         TokenKind::EscapeSeq => {
-                            cur_text.push(match slice {
-                                "\\0"  => '\0',
-                                "\\\"" => '\"',
-                                "\\\\" => '\\',
-                                "\\n"  => '\n',
-                                "\\r"  => '\r',
-                                "\\t"  => '\t',
-                                "\\b"  => '\x08',
-                                "\\f"  => '\x0c',
-                                "\\v"  => '\x0b',
-                                _ => unreachable!()
-                            });
+                            let seq = EscSeq::from_u32(token.payload());
 
+                            use EscSeq::*;
+                            match seq {
+                                Some(Null) => cur_text.push('\0'),
+                                Some(Quote) => cur_text.push('\"'),
+                                Some(Slash) => cur_text.push('\\'),
+                                Some(N) => cur_text.push('\n'),
+                                Some(R) => cur_text.push('\r'),
+                                Some(T) => cur_text.push('\t'),
+                                Some(B) => cur_text.push('\x08'),
+                                Some(F) => cur_text.push('\x0c'),
+                                Some(V) => cur_text.push('\x0b'),
+                                Some(NL) => (),
+                                Some(CRNL) => (),
+                                Some(X(n)) => cur_text.push(char::from_u32(n as u32).unwrap()),
+                                Some(U(n)) => cur_text.push(char::from_u32(n as u32).unwrap()),
+                                Some(UU(n)) => cur_text.push(char::from_u32(n.into_u32()).unwrap()),
+                                None => todo!("processing error")
+                            }
+                            
                             self.advance();
                         }
 
@@ -1473,7 +1552,7 @@ impl<'r> Parser<'r> {
 
                         TokenKind::Error(_) => todo!("parse error in string"),
 
-                        _ => unreachable!()
+                        _ => unreachable!("Hi")
                     }
                 }
 
@@ -1489,6 +1568,10 @@ impl<'r> Parser<'r> {
                     }
                 }
             }
+
+            TokenKind::True => Expr::True(token.span()),
+            TokenKind::False => Expr::False(token.span()),
+            TokenKind::Underscore => Expr::Blank(token.span()),
 
             TokenKind::LBracket => {
                 let span_start = token.span().start();

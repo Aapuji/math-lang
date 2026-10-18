@@ -130,6 +130,7 @@ pub enum Expr {
     },
     True(Span),
     False(Span),
+    Blank(Span),
     Grouping {
         expr: Box<Expr>,
         span: Span
@@ -143,13 +144,13 @@ pub enum Expr {
         tail: Option<Box<Expr>>,
         span: Span
     },
-    Operations {    // Thoughts: After name resolution, a pass is done to resolve this node into the concrete operation nodes
-                    // Additionally, it can perform some form of disambiguation, since all operators are built-in at that stage
-                    // So it can take the longest possible valid operator, etc.
-                    // For example, ::- would take :: as it is the longest builtin operator, and then - as the longest one after that.
-        items: Vec<OperationItem>,
-        span: Span
-    },
+    // Operations {    // Thoughts: After name resolution, a pass is done to resolve this node into the concrete operation nodes
+    //                 // Additionally, it can perform some form of disambiguation, since all operators are built-in at that stage
+    //                 // So it can take the longest possible valid operator, etc.
+    //                 // For example, ::- would take :: as it is the longest builtin operator, and then - as the longest one after that.
+    //     items: Vec<OperationItem>,
+    //     span: Span
+    // },
     Or {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
@@ -378,10 +379,11 @@ impl Expr {
             Self::Imag { span, .. } => *span,
             Self::True(span) => *span,
             Self::False(span) => *span,
+            Self::Blank(span) => *span,
             Self::Grouping { span, .. } => *span,
             Self::Array { span, .. } => *span,
             Self::Block { span, .. } => *span,
-            Self::Operations { span, .. } => *span,
+            // Self::Operations { span, .. } => *span,
             Self::Or { span, .. } => *span,
             Self::Xor { span, .. } => *span,
             Self::And { span, .. } => *span,
@@ -434,10 +436,11 @@ impl Expr {
             Self::Imag { span, .. } => span,
             Self::True(span) => span,
             Self::False(span) => span,
+            Self::Blank(span) => span,
             Self::Grouping { span, .. } => span,
             Self::Array { span, .. } => span,
             Self::Block { span, .. } => span,
-            Self::Operations { span, .. } => span,
+            // Self::Operations { span, .. } => span,
             Self::Or { span, .. } => span,
             Self::Xor { span, .. } => span,
             Self::And { span, .. } => span,
@@ -538,9 +541,9 @@ impl Var {
         }
     }
 
-    /// Creates a fake Token from the Var.
-    pub fn synth_token(&self) -> Token {
-        Token::with_payload(TokenKind::Ident, self.id as u32, self.span)
+    /// Creates a fake Token from the Var and optional Span to override.
+    pub fn synth_token(&self, span: Option<Span>) -> Token {
+        Token::with_payload(TokenKind::Ident, self.id as u32, span.unwrap_or(self.span))
     }
 
     pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str {
@@ -602,9 +605,9 @@ impl Oper {
         }
     }
 
-    /// Creates a fake Token from the Oper.
-    pub fn synth_token(&self) -> Token {
-        Token::with_payload(TokenKind::Operator, self.id, self.span)
+    /// Creates a fake Token from the Oper and an optional Span.
+    pub fn synth_token(&self, span: Option<Span>) -> Token {
+        Token::with_payload(TokenKind::Operator, self.id, span.unwrap_or(self.span))
     }
 
     pub fn get_lexeme<'s>(&self, source_map: &'s SourceMap) -> &'s str {

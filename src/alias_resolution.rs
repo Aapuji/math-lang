@@ -239,16 +239,16 @@ impl AliasResolver {
     pub fn resolve_var_to_var(&mut self, name: &mut Var) {
         if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
             if resolved.kind == AliasKind::Ident {
-                let new_name = match resolved.frag {
+                let (new_name, def_span) = match resolved.frag {
                     AliasFragment::Ident(id) => {
-                        Var::new(id.id(), name.span())
+                        (Var::new(id.id(), name.span()), id.span())
                     },
                     _ => unreachable!()
                 };
 
                 self.record_table.push(AliasRecord {
                     usage_span: name.span(),
-                    def_span: new_name.span()
+                    def_span
                 });
                 *name = new_name;
             } else {
@@ -318,29 +318,29 @@ impl AliasResolver {
                 self.exit_scope();
             }
 
-            Expr::Operations { items, span: _ } => {
-                for item in items {
-                    match item {
-                        OperationItem::Expr(expr) => self.resolve_expr(expr),
-                        OperationItem::Ident(name) => if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
-                            match resolved.kind {
-                                AliasKind::Ident => *name = resolved.frag.get_var().unwrap(),
-                                AliasKind::Oper => *item = OperationItem::Oper(resolved.frag.get_op().unwrap()),
-                                AliasKind::Expr => *item = OperationItem::Expr(Box::new(resolved.frag.get_expr().unwrap().clone()))
-                            }
-                        }
+            // Expr::Operations { items, span: _ } => {
+            //     for item in items {
+            //         match item {
+            //             OperationItem::Expr(expr) => self.resolve_expr(expr),
+            //             OperationItem::Ident(name) => if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
+            //                 match resolved.kind {
+            //                     AliasKind::Ident => *name = resolved.frag.get_var().unwrap(),
+            //                     AliasKind::Oper => *item = OperationItem::Oper(resolved.frag.get_op().unwrap()),
+            //                     AliasKind::Expr => *item = OperationItem::Expr(Box::new(resolved.frag.get_expr().unwrap().clone()))
+            //                 }
+            //             }
 
-                        OperationItem::Oper(oper) => if let Some(resolved) = self.get_alias(&AliasItem::from(*oper)) {
-                            // by alias kind rules, this must be an operator
-                            *oper = resolved.frag.get_op().unwrap();
-                        }
+            //             OperationItem::Oper(oper) => if let Some(resolved) = self.get_alias(&AliasItem::from(*oper)) {
+            //                 // by alias kind rules, this must be an operator
+            //                 *oper = resolved.frag.get_op().unwrap();
+            //             }
 
-                        OperationItem::OpLit(oplit) => {
-                            self.resolve_var_to_var(oplit.name_mut());
-                        }
-                    }
-                }
-            }
+            //             OperationItem::OpLit(oplit) => {
+            //                 self.resolve_var_to_var(oplit.name_mut());
+            //             }
+            //         }
+            //     }
+            // }
 
             Expr::Call { callee, args, kwargs, span: _ } => {
                 self.resolve_expr(callee);
@@ -448,7 +448,7 @@ impl AliasResolver {
     }
 
     /// Resolves a Var into an AliasFragment.
-    pub fn resolve_var(&mut self, name: &mut Var) -> AliasFragment {
+    pub fn resolve_var(&mut self, name: &mut Var) -> (AliasFragment, Option<AliasRecord>) {
         if let Some(resolved) = self.get_alias(&AliasItem::from(*name)) {
             let (new_frag, def_span) = match resolved.frag {
                 AliasFragment::Ident(resolved_name) => (AliasFragment::Ident(Var::new(resolved_name.id(), name.span())), resolved_name.span()),
@@ -463,19 +463,20 @@ impl AliasResolver {
                 }
             };
 
-            self.record_table.push(AliasRecord {
+            let record = AliasRecord {
                 usage_span: name.span(),
                 def_span
-            });
-            
-            new_frag
+            };
+
+            self.record_table.push(record);
+            (new_frag, Some(record))
         } else {
-            AliasFragment::Ident(*name)
+            (AliasFragment::Ident(*name), None)
         }
     }
 
     /// Resolves an Oper into an AliasFragment.
-    pub fn resolve_oper(&mut self, oper: &mut Oper) -> AliasFragment {
+    pub fn resolve_oper(&mut self, oper: &mut Oper) -> (AliasFragment, Option<AliasRecord>) {
         if let Some(resolved) = self.get_alias(&AliasItem::from(*oper)) {
             let (new_frag, def_span) = match resolved.frag {
                 AliasFragment::Ident(_) => unreachable!(),
@@ -484,14 +485,17 @@ impl AliasResolver {
                 AliasFragment::Expr(_) => unreachable!()
             };
 
-            self.record_table.push(AliasRecord {
+            let record = AliasRecord {
                 usage_span: oper.span(),
                 def_span
-            });
-            
-            new_frag
+            };
+
+            println!("ALIAS RECORD: {:?}", record);
+
+            self.record_table.push(record);
+            (new_frag, Some(record))
         } else {
-            AliasFragment::Oper(*oper)
+            (AliasFragment::Oper(*oper), None)
         }
     }
 
@@ -737,8 +741,16 @@ pub enum AliasKind {
     Expr
 }
 
+/// Holds a record of an alias resolution. The usage_span tells 
 #[derive(Debug, Clone, Copy)]
 pub struct AliasRecord {
     usage_span: Span,
     def_span: Span
+}
+
+impl AliasRecord {
+    /// Returns the Span of the resolve-to definition of this resolution record.
+    pub fn def_span(&self) -> Span {
+        self.def_span
+    }
 }

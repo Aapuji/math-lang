@@ -1,3 +1,4 @@
+use std::ffi::os_str;
 use std::{collections::HashMap, hash::Hash};
 use std::ops::RangeInclusive;
 
@@ -42,6 +43,7 @@ pub enum TokenKind {
     // Keywords -- when changing this list, make sure to change the list in the symbol interner 
     Let, Var, Const, Fn, Sym, Context, Enum, Struct, Type,
     Macro, Alias,
+    True, False,
     For, While, If, Else, Match, When, Using, In,
     And, Or, Xor, Not, Is, As,
     SlashIn, SlashNotIn,
@@ -67,6 +69,8 @@ impl TokenKind {
             Type       |
             Macro      |
             Alias      | 
+            True       |
+            False      |
             For        |
             While      |
             If         |
@@ -102,8 +106,8 @@ pub enum LexerErrorKind {
 /// The `payload` field is a generic payload. For tokens that do not use it, it does not add any extra memory usage.
 ///   - Identifiers and operators use it as an Option<Spur> as the index into the Rodeo string interning system
 ///   - Strings use it to store the string prefix
+///   - String escape sequences store the variant into upper 4 bits and for unicode escape sequences stores the unicode value in the lower 8/16/24 bits.
 ///   - Integers either store the whole value if it fits in a u31 with highest bit 0, or sets highest bit and then encodes the base of the number.
-///   - perhaps in the future, optimizations can be made to put small integers or floats, etc into this to make it faster
 pub struct Token {
     kind: TokenKind,
     payload: u32,  // A generic payload
@@ -202,13 +206,15 @@ pub const OPERATOR_CHARSET: &'static str = "=:+-*/^.%<>!&|~$?@";
 pub struct ActiveInterner {
     rodeo: Rodeo,
     keywords: HashMap<Spur, TokenKind>,
+    operators: HashMap<&'static str, Spur>,
     builtin_operator_range: RangeInclusive<Spur>
 }
 
 impl ActiveInterner {
     pub fn new() -> Self {
-        let mut rodeo = Rodeo::new();
+        let mut rodeo = Rodeo::<Spur>::new();
         let mut keywords = HashMap::new();
+        let mut operators = HashMap::new();
 
         // keywords
         keywords.insert(rodeo.get_or_intern_static("let"), TokenKind::Let);
@@ -222,6 +228,8 @@ impl ActiveInterner {
         keywords.insert(rodeo.get_or_intern_static("type"), TokenKind::Type);
         keywords.insert(rodeo.get_or_intern_static("macro"), TokenKind::Macro);
         keywords.insert(rodeo.get_or_intern_static("alias"), TokenKind::Alias);
+        keywords.insert(rodeo.get_or_intern_static("true"), TokenKind::True);
+        keywords.insert(rodeo.get_or_intern_static("false"), TokenKind::False);
         keywords.insert(rodeo.get_or_intern_static("for"), TokenKind::For);
         keywords.insert(rodeo.get_or_intern_static("while"), TokenKind::While);
         keywords.insert(rodeo.get_or_intern_static("if"), TokenKind::If);
@@ -231,7 +239,8 @@ impl ActiveInterner {
         keywords.insert(rodeo.get_or_intern_static("using"), TokenKind::Using);
 
         // both keywords and builtin operators
-        let ostart: Spur = rodeo.get_or_intern_static("in");
+        let ostart = rodeo.get_or_intern_static("in");
+        let mut oend = Spur::default();
         keywords.insert(ostart, TokenKind::In);
         keywords.insert(rodeo.get_or_intern_static("and"), TokenKind::And);
         keywords.insert(rodeo.get_or_intern_static("or"), TokenKind::Or);
@@ -243,65 +252,78 @@ impl ActiveInterner {
         keywords.insert(rodeo.get_or_intern_static(r"\notIn"), TokenKind::SlashNotIn);
 
         // builtin operators
-        rodeo.get_or_intern_static("=");
-        rodeo.get_or_intern_static("∈");
-        rodeo.get_or_intern_static("∉");
-        rodeo.get_or_intern_static("+");
-        rodeo.get_or_intern_static("+=");
-        rodeo.get_or_intern_static("-");
-        rodeo.get_or_intern_static("-=");
-        rodeo.get_or_intern_static("+-");
-        rodeo.get_or_intern_static("+-=");
-        rodeo.get_or_intern_static("-+");
-        rodeo.get_or_intern_static("-+=");
-        rodeo.get_or_intern_static("*");
-        rodeo.get_or_intern_static("*=");
-        rodeo.get_or_intern_static("/");
-        rodeo.get_or_intern_static("/=");
-        rodeo.get_or_intern_static("//");
-        rodeo.get_or_intern_static("//=");
-        rodeo.get_or_intern_static("%");
-        rodeo.get_or_intern_static("%=");
-        rodeo.get_or_intern_static("^");
-        rodeo.get_or_intern_static("^=");
-        rodeo.get_or_intern_static("|");
-        rodeo.get_or_intern_static("==");
-        rodeo.get_or_intern_static("!=");
-        rodeo.get_or_intern_static("<");
-        rodeo.get_or_intern_static("<=");
-        rodeo.get_or_intern_static(">");
-        rodeo.get_or_intern_static(">=");
-        rodeo.get_or_intern_static("...");
-        rodeo.get_or_intern_static("..");
-        rodeo.get_or_intern_static("..+");
-        rodeo.get_or_intern_static("..-");
-        rodeo.get_or_intern_static("<..");
-        rodeo.get_or_intern_static("<..+");
-        rodeo.get_or_intern_static("<..-");
-        rodeo.get_or_intern_static("..<");
-        rodeo.get_or_intern_static("..<+");
-        rodeo.get_or_intern_static("..<-");
-        rodeo.get_or_intern_static("<..<");
-        rodeo.get_or_intern_static("<..<+");
-        rodeo.get_or_intern_static("<..<-");
-        rodeo.get_or_intern_static(":");
-        rodeo.get_or_intern_static(":+");
-        rodeo.get_or_intern_static(":-");
-        rodeo.get_or_intern_static("<:");
-        rodeo.get_or_intern_static("<:+");
-        rodeo.get_or_intern_static("<:-");
-        rodeo.get_or_intern_static(":<");
-        rodeo.get_or_intern_static(":<+");
-        rodeo.get_or_intern_static(":<-");
-        rodeo.get_or_intern_static("<:<");
-        rodeo.get_or_intern_static("<:<+");
-        rodeo.get_or_intern_static("<:<-");
-        rodeo.get_or_intern_static("::");
-        rodeo.get_or_intern_static("<::");
-        rodeo.get_or_intern_static(":<:");
-        rodeo.get_or_intern_static("@");
-        rodeo.get_or_intern_static("->");
-        let oend = rodeo.get_or_intern_static("=>");
+        macro_rules! intern_operator_static {
+            ($lexeme:expr) => {
+                operators.insert($lexeme, rodeo.get_or_intern_static($lexeme))
+            };
+
+            ($lexeme:expr, $index_ref:expr) => {
+                {
+                    *$index_ref = rodeo.get_or_intern_static($lexeme);
+                    operators.insert($lexeme, *$index_ref);
+                }
+            }
+        }
+
+        intern_operator_static!("=");
+        intern_operator_static!("∈");
+        intern_operator_static!("∉");
+        intern_operator_static!("+");
+        intern_operator_static!("+=");
+        intern_operator_static!("-");
+        intern_operator_static!("-=");
+        intern_operator_static!("+-");
+        intern_operator_static!("+-=");
+        intern_operator_static!("-+");
+        intern_operator_static!("-+=");
+        intern_operator_static!("*");
+        intern_operator_static!("*=");
+        intern_operator_static!("/");
+        intern_operator_static!("/=");
+        intern_operator_static!("//");
+        intern_operator_static!("//=");
+        intern_operator_static!("%");
+        intern_operator_static!("%=");
+        intern_operator_static!("^");
+        intern_operator_static!("^=");
+        intern_operator_static!("|");
+        intern_operator_static!("==");
+        intern_operator_static!("!=");
+        intern_operator_static!("<");
+        intern_operator_static!("<=");
+        intern_operator_static!(">");
+        intern_operator_static!(">=");
+        intern_operator_static!("...");
+        intern_operator_static!("..");
+        intern_operator_static!("..+");
+        intern_operator_static!("..-");
+        intern_operator_static!("<..");
+        intern_operator_static!("<..+");
+        intern_operator_static!("<..-");
+        intern_operator_static!("..<");
+        intern_operator_static!("..<+");
+        intern_operator_static!("..<-");
+        intern_operator_static!("<..<");
+        intern_operator_static!("<..<+");
+        intern_operator_static!("<..<-");
+        intern_operator_static!(":");
+        intern_operator_static!(":+");
+        intern_operator_static!(":-");
+        intern_operator_static!("<:");
+        intern_operator_static!("<:+");
+        intern_operator_static!("<:-");
+        intern_operator_static!(":<");
+        intern_operator_static!(":<+");
+        intern_operator_static!(":<-");
+        intern_operator_static!("<:<");
+        intern_operator_static!("<:<+");
+        intern_operator_static!("<:<-");
+        intern_operator_static!("::");
+        intern_operator_static!("<::");
+        intern_operator_static!(":<:");
+        intern_operator_static!("@");
+        intern_operator_static!("->");
+        intern_operator_static!("=>", &mut oend);
 
         // these are only used inside an operator literal (@lassoc/@rassoc)
         rodeo.get_or_intern_static("lassoc");
@@ -312,6 +334,7 @@ impl ActiveInterner {
         Self {
             rodeo,
             keywords,
+            operators,
             builtin_operator_range: ostart..=oend
         }
     }
@@ -334,6 +357,7 @@ impl ActiveInterner {
         ResolvedInterner {
             rodeo_resolver: self.rodeo.into_resolver(),
             keywords: self.keywords,
+            operators: self.operators,
             builtin_operator_range: self.builtin_operator_range
         }
     }
@@ -343,6 +367,7 @@ impl ActiveInterner {
 pub struct ResolvedInterner {
     rodeo_resolver: RodeoResolver,
     keywords: HashMap<Spur, TokenKind>,
+    operators: HashMap<&'static str, Spur>,
     builtin_operator_range: RangeInclusive<Spur>
 }
 
@@ -360,6 +385,10 @@ impl ResolvedInterner {
 
     pub fn is_builtin_operator(&self, spur: &Spur) -> bool {
         self.builtin_operator_range.contains(spur)
+    }
+
+    pub fn operators(&self) -> &HashMap<&'static str, Spur> {
+        &self.operators
     }
 }
 

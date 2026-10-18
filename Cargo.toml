@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bitmatch = "0.1.1"
 lasso = "0.7.3"
 rug = "1.28.1"
+u24 = "0.6.1"
 unicode-ident = "1.0.22"

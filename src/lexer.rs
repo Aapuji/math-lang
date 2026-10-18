@@ -1,7 +1,9 @@
 use std::iter::Peekable;
 use std::str::CharIndices;
 
+use bitmatch::bitmatch;
 use lasso::Key;
+use u24::u24;
 use unicode_ident::{is_xid_start, is_xid_continue};
 
 use crate::source::{SourceId, SourceMap, Span};
@@ -423,6 +425,15 @@ impl<'t> Lexer<'t> {
                     kind = None;
                     start = end;
                 }
+            };
+
+            ( $payload:expr ) => {
+                if let Some(k) = kind {
+                    tokens.push(Token::with_payload(k, $payload, Span::new(start, end, self.source)));
+                    
+                    kind = None;
+                    start = end;
+                }
             }
         }
 
@@ -505,23 +516,24 @@ impl<'t> Lexer<'t> {
                     push_prev_tok!();
 
                     kind = Some(TokenKind::EscapeSeq);
+                    let mut seq = None; // should be replaced
                     start = i;
                     end = i + 1;
 
                     match self.next() {
-                        Some((i, 
-                            '0' 
-                            | '"' 
-                            | '\\' 
-                            | 'n' 
-                            | 'r'
-                            | 't'
-                            | 'b' 
-                            | 'f'
-                            | 'v' 
-                        )) => end = i + 1,
+                        Some((i, '0')) =>  { seq = Some(EscSeq::Null);  end = i + 1; }
+                        Some((i, '"')) =>  { seq = Some(EscSeq::Quote); end = i + 1; }
+                        Some((i, '\\')) => { seq = Some(EscSeq::Slash); end = i + 1; }
+                        Some((i, 'n')) =>  { seq = Some(EscSeq::N);     end = i + 1; }
+                        Some((i, 'r')) =>  { seq = Some(EscSeq::R);     end = i + 1; }
+                        Some((i, 't')) =>  { seq = Some(EscSeq::T);     end = i + 1; }
+                        Some((i, 'b')) =>  { seq = Some(EscSeq::B);     end = i + 1; }
+                        Some((i, 'f')) =>  { seq = Some(EscSeq::F);     end = i + 1; }
+                        Some((i, 'v')) =>  { seq = Some(EscSeq::V);     end = i + 1; }
 
                         Some((_, '\n')) => {
+                            seq = Some(EscSeq::NL);
+
                             loop {
                                 match self.text.peek() {
                                     Some(&(i, ch)) if ch.is_whitespace() => {
@@ -537,6 +549,7 @@ impl<'t> Lexer<'t> {
                         }
 
                         Some((_, '\r')) if matches!(self.text.peek(), Some((_, '\n'))) => {
+                            seq = Some(EscSeq::CRNL);
                             self.next();
 
                             loop {
@@ -556,10 +569,14 @@ impl<'t> Lexer<'t> {
                         // \xHH, HH <= 7F
                         Some((_, 'x')) => {
                             let mut valid = true;
+                            let mut code = 0x0;
 
                             // 0-7
                             match self.text.peek() {
-                                Some(&(i, ch)) if ('0'..='7').contains(&ch) => end = i + 1,
+                                Some(&(i, ch)) if ('0'..='7').contains(&ch) => {
+                                    code = ch as u8 - b'0';
+                                    end = i + 1;
+                                }
                                 
                                 Some(&(i, ch)) if ch.is_ascii_hexdigit() => {
                                     tokens.push(Token::new(
@@ -583,11 +600,15 @@ impl<'t> Lexer<'t> {
                             }
 
                             if valid {
+                                code <<= 4;
                                 self.next();
 
                                 // 0-F
                                 match self.text.peek() {
-                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => end = i + 1,
+                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => {
+                                        code |= ch.to_digit(16).unwrap() as u8;
+                                        end = i + 1;
+                                    }
                                     
                                     None => return push_unterminated_str!(),
                                     
@@ -605,13 +626,20 @@ impl<'t> Lexer<'t> {
                                     self.next();
                                 }
                             }
+
+                            seq = Some(EscSeq::X(code))
                         }
 
                         // \uHHHH
                         Some((_, 'u')) => {
+                            let mut code = 0x0;
                             for _ in 0..4 {
                                 match self.text.peek() {
-                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => end = i + 1,
+                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => {
+                                        code <<= 4;
+                                        code |= ch.to_digit(16).unwrap() as u16;
+                                        end = i + 1;
+                                    }
 
                                     None => return push_unterminated_str!(),
 
@@ -627,13 +655,20 @@ impl<'t> Lexer<'t> {
 
                                 self.next();
                             }
+
+                            seq = Some(EscSeq::U(code))
                         }
 
                         // \UHHHHHH
                         Some((_, 'U')) => {
+                            let mut code = 0x0;
                             for _ in 0..6 {
                                 match self.text.peek() {
-                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => end = i + 1,
+                                    Some(&(i, ch)) if ch.is_ascii_hexdigit() => {
+                                        code <<= 4;
+                                        code |= ch.to_digit(16).unwrap();
+                                        end = i + 1;
+                                    }
 
                                     None => return push_unterminated_str!(),
 
@@ -649,6 +684,8 @@ impl<'t> Lexer<'t> {
 
                                 self.next();
                             }
+
+                            seq = Some(EscSeq::UU(u24::truncating_from_u32(code)))
                         }
 
                         None => return push_unterminated_str!(),
@@ -660,6 +697,10 @@ impl<'t> Lexer<'t> {
                             
                             kind = None;
                         }
+                    }
+
+                    if let Some(seq) = seq {
+                        push_prev_tok!(seq.to_payload())
                     }
                 }
 
@@ -906,6 +947,70 @@ impl StringPrefix {
             Err(())
         } else {
             Self::try_from_u8(n as u8)
+        }
+    }
+}
+
+/// Tag fits in 4 bits
+/// Payload for max value fits in 24 bits
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EscSeq {
+    Null,    // \0
+    Quote,   // \"
+    Slash,   // \\
+    N,       // \n
+    R,       // \r
+    T,       // \t
+    B,       // \b
+    F,       // \f
+    V,       // \v
+    NL,      // \\n<whitespace>
+    CRNL,    // \\r\n<whitespace>
+    X(u8),   // \xHH, HH <= 7F
+    U(u16),  // \uHHHH
+    UU(u24), // \UHHHHHH
+}
+
+impl EscSeq {
+    /// Puts tag into highest 4 bits and value into lowest 24 bits
+    pub fn to_payload(self) -> u32 {
+        match self {
+            Self::Null  => 0x0,
+            Self::Quote => 0x1 << 28,
+            Self::Slash => 0x2 << 28,
+            Self::N     => 0x3 << 28,
+            Self::R     => 0x4 << 28,
+            Self::T     => 0x5 << 28,
+            Self::B     => 0x6 << 28,
+            Self::F     => 0x7 << 28,
+            Self::V     => 0x8 << 28,
+            Self::NL    => 0x9 << 28,
+            Self::CRNL  => 0xA << 28,
+            Self::X(n)  => 0xB << 28 | n as u32,
+            Self::U(n)  => 0xC << 28 | n as u32,
+            Self::UU(n) => 0xD << 28 | n.into_u32()
+        }
+    }
+
+    #[bitmatch]
+    pub fn from_u32(payload: u32) -> Option<Self> {
+        #[bitmatch]
+        match payload {
+            "0000_0000_00000000_00000000_00000000" => Some(Self::Null),
+            "0001_0000_00000000_00000000_00000000" => Some(Self::Quote),
+            "0010_0000_00000000_00000000_00000000" => Some(Self::Slash),
+            "0011_0000_00000000_00000000_00000000" => Some(Self::N),
+            "0100_0000_00000000_00000000_00000000" => Some(Self::R),
+            "0101_0000_00000000_00000000_00000000" => Some(Self::T),
+            "0110_0000_00000000_00000000_00000000" => Some(Self::B),
+            "0111_0000_00000000_00000000_00000000" => Some(Self::F),
+            "1000_0000_00000000_00000000_00000000" => Some(Self::V),
+            "1001_0000_00000000_00000000_00000000" => Some(Self::NL),
+            "1010_0000_00000000_00000000_00000000" => Some(Self::CRNL),
+            "1011_0000_00000000_00000000_nnnnnnnn" => Some(Self::X(n as u8)),
+            "1100_0000_00000000_nnnnnnnn_nnnnnnnn" => Some(Self::U(n as u16)),
+            "1101_0000_nnnnnnnn_nnnnnnnn_nnnnnnnn" => Some(Self::UU(u24::truncating_from_u32(n))),
+            _ => None
         }
     }
 }
