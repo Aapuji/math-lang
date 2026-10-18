@@ -21,9 +21,9 @@ rewrite rule W(?x) + W(?y) =>
 rewrite rule diff(?f(?[$x]g), $x) => diff(f(x), g(x)) * diff(g(x), x);
 
 # And constraint on independency
-sym Linear(m, b);
+sym Linear(x, m, b);
 
-rewrite rule ?m * $x + ?b => Linear(m, b)(x)
+rewrite rule ?m * $x + ?b => Linear(x, m, b)
    when free([m, b], x).all();
 
 # Constraints
