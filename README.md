@@ -18,7 +18,7 @@ rewrite rule W(?x) + W(?y) =>
   W(x * y * (1/W(x) + 1/W(y)));
 
 # We can bind variables in arbitrary expressions
-rewrite rule diff(?f(?[$x]g), $x) => diff(f(x), g(x)) * diff(g(x), x);
+rewrite rule diff(?f(?[$x]g), $x) => diff(f(g(x)), g(x)) * diff(g(x), x);
 
 # And constraint on independency
 sym Linear(x, m, b);
